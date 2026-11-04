@@ -20,7 +20,7 @@ const i32 tape_rate[] = {-1365, -682, -341, -170, 170, 341, 682, 1365};
 const u32 tape_bands[] = {5, 24, 43, 62, 85, 98, 120};
 const u32 grab_ratios[] = {256,271,287,304,323,342,362,384,406,431,456,483,512};
 const u32 rev_lengths[] = {691,827,941,1061,1181,1319,1481,1619};
-const u32 ap_lengths[] = {142,379,149,367};
+const u32 ap_lengths[] = {71,190,75,184};
 
 u32 control(i32 x) { return x < 0 ? 0u : static_cast<u32>(x) >> 16; }
 u32 choice(i32 x, u32 count) { return (control(x) * count) >> 15; }
@@ -375,7 +375,7 @@ i32 fragment_sample(Buffer b, u32 start, u32 size, i32 head) {
 void modulation(State& s, Buffer b, u32 mode, u32 knob, u32 spread,
                 i32 in_l, i32 in_r, i32& l, i32& r) {
     // Phaser/flanger: knob sets rate. Chorus: fixed rate, variable depth.
-    s.modulation_phase += mode == 5 ? 82000u : 40000u + knob * 10u;
+    s.modulation_phase += mode == 5 ? 164000u : 80000u + knob * 20u;
     const u32 wave_l = modulation_wave(s.modulation_phase);
     const u32 wave_r = modulation_wave(s.modulation_phase + (mode == 5 ? 0x80000000u : spread << 16));
     if (mode == 3) {
@@ -398,16 +398,16 @@ void modulation(State& s, Buffer b, u32 mode, u32 knob, u32 spread,
         l = clamp16(values[0] * 2 - in_l);
         r = clamp16(values[1] * 2 - in_r);
     } else {
-        const u32 depth = mode == 4 ? 360u : 500u + ((knob * 1300u) >> 15);
-        const u32 base = mode == 4 ? 12u : 440u;
+        const u32 depth = mode == 4 ? 180u : 250u + ((knob * 650u) >> 15);
+        const u32 base = mode == 4 ? 6u : 220u;
         u32 lag_l = (base << 8) + ((wave_l * depth) >> 7);
         u32 lag_r = (base << 8) + ((wave_r * depth) >> 7);
         if (mode == 5) {
             // Slew the read heads, including when depth is adjusted, so the
             // recorded waveform is never jumped to a distant position.
             if (!s.chorus_lag[0]) { s.chorus_lag[0] = static_cast<i32>(lag_l); s.chorus_lag[1] = static_cast<i32>(lag_r); }
-            s.chorus_lag[0] = approach(s.chorus_lag[0], static_cast<i32>(lag_l), 32);
-            s.chorus_lag[1] = approach(s.chorus_lag[1], static_cast<i32>(lag_r), 32);
+            s.chorus_lag[0] = approach(s.chorus_lag[0], static_cast<i32>(lag_l), 16);
+            s.chorus_lag[1] = approach(s.chorus_lag[1], static_cast<i32>(lag_r), 16);
             lag_l = static_cast<u32>(s.chorus_lag[0]); lag_r = static_cast<u32>(s.chorus_lag[1]);
         }
         i32 dl, discard, dr;
@@ -480,7 +480,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     // multiplications per sample.
     if (wet_mode == 0) {
         const u32 reverb_size = 18000u + ((static_cast<u32>(s.smoothed[0]) * 14000u) >> 15);
-        for (u32 k = 0; k < 8; ++k) s.reverb_lengths[k] = (rev_lengths[k] * reverb_size) >> 15;
+        for (u32 k = 0; k < 8; ++k) s.reverb_lengths[k] = (rev_lengths[k] * reverb_size) >> 16;
         s.reverb_feedback = 18000 + ((s.smoothed[0] * 13500) >> 15);
         s.reverb_diffusion = (wet_moving * 5) >> 3;
     }
@@ -521,10 +521,10 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     // A longer requested loop gets a larger safe initial capture, while even
     // the shortest loop waits for at least 120 ms of incoming audio.
     const u32 initial_capture = mode != 0 && !s.captured && length > 5292 ? length / 3 : 1764;
-    const u32 wet_time = 882 + ((static_cast<u32>(s.smoothed[0]) * 31000u) >> 15);
+    const u32 wet_time = (882 + ((static_cast<u32>(s.smoothed[0]) * 31000u) >> 15)) / 2;
     const u32 loop_modify = static_cast<u32>(s.smoothed[3]);
     const i32 tape_base = tape_rate[band(loop_modify, tape_bands, 7)];
-    const i32 tape_step = tape_base;
+    const i32 tape_step = tape_base * 2;
     const u32 wet_modify = static_cast<u32>(wet_moving);
     const i32 feedback = static_cast<i32>((wet_modify * 32112u) >> 15);
     const u32 k = (static_cast<u32>(s.smoothed[1]) * 128u) >> 15;
@@ -543,24 +543,26 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
                           fragment_start, fragment_length, fragment_head, fragment_step);
             current_pan = (random_state >> 8) & 16383u;
             next_length = 0;
-            fragment_total = fragment_remaining = fragment_length * 3;
+            fragment_total = fragment_remaining = (fragment_length * 3) / 2;
             const u32 spacing = 4 + (((32767u - density) * 180u) >> 15);
             fragment_wait = spacing + ((random_state >> 8) % (spacing + 1));
         }
     }
-    const u32 grab_period = 1102 + (wet_time >> 2);
+    const u32 grab_period = 551 + (wet_time >> 2);
     const u32 wet_spread_step = spread && wet_mode == 2 ? 2147483647u / grab_period : 0;
     const i32 history_tape_gain = density > 16384 ? 32767 - static_cast<i32>((density - 16384) * 13 / 10) : 32767;
     const u32 active_looper = transport.playing ? mode : 0;
-    for (u32 i = 0; i < opxy::block_frames; ++i) {
+    for (u32 i = 0; i < opxy::block_frames / 2; ++i) {
         if (s.smoothed[4] != targets[4]) s.smoothed[4] = smooth_control(s.smoothed[4], targets[4]);
-        // Clock is fixed at 44.1 kHz: every input sample is processed once.
-        const i32 x_l = left[i] >> 17, x_r = right[i] >> 17;
+        // Average each input pair before decimation to reduce high-frequency aliasing.
+        const i32 x_l = ((left[2*i] >> 17) + (left[2*i+1] >> 17)) / 2;
+        const i32 x_r = ((right[2*i] >> 17) + (right[2*i+1] >> 17)) / 2;
         const i32 mono = (x_l + x_r) / 2;
         s.tape_input_lp[0] += ((mono - s.tape_input_lp[0]) * 3) / 8;
         s.tape_input_lp[1] += ((s.tape_input_lp[0] - s.tape_input_lp[1]) * 3) / 8;
-        if (++s.tape_phase == 3) s.tape_phase = 0;
-        const bool tape_tick = s.tape_phase == 0;
+        s.tape_phase += 2;
+        const bool tape_tick = s.tape_phase >= 3;
+        if (tape_tick) s.tape_phase -= 3;
         if (tape_tick && transport.playing) {
             tape_put(b, history_base + history_write, s.tape_input_lp[1]);
             if (++history_write == history_frames) history_write = 0;
@@ -623,14 +625,14 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         if (mode && fragment_remaining) {
             const bool continuous = density > 16384;
             if (!continuous) next_length = 0;
-            if (continuous && fragment_remaining <= 441 && !next_length)
+            if (continuous && fragment_remaining <= 220 && !next_length)
                 pick_fragment(length, history_valid, history_write, tape_step, random_state,
                               next_start, next_length, next_head, next_step);
             const i32 grain = fragment_sample(b, fragment_start, fragment_length, fragment_head);
             const u32 elapsed = fragment_total - fragment_remaining;
-            u32 fade = elapsed < 441 ? elapsed : 441;
+            u32 fade = elapsed < 220 ? elapsed : 220;
             if (!continuous && fragment_remaining < fade) fade = fragment_remaining;
-            const i32 level = q15(static_cast<i32>(fade * 63u), static_cast<i32>(density));
+            const i32 level = q15(static_cast<i32>(fade * 126u), static_cast<i32>(density));
             i32 added = q15(grain, level);
             i32 fragment_l = q15(added, 16384 + static_cast<i32>(current_pan));
             i32 fragment_r = q15(added, 32767 - static_cast<i32>(current_pan));
@@ -638,7 +640,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
                 const i32 next_grain = fragment_sample(b, next_start, next_length, next_head);
                 const i32 next_added = q15(next_grain, level);
                 const i32 pan = static_cast<i32>((random_state >> 8) & 16383u);
-                const i32 fade_next = static_cast<i32>(((441u - fragment_remaining) * 4096u) / 441u);
+                const i32 fade_next = static_cast<i32>(((220u - fragment_remaining) * 4096u) / 220u);
                 fragment_l = mix12(fragment_l, q15(next_added, 16384 + pan), fade_next);
                 fragment_r = mix12(fragment_r, q15(next_added, 32767 - pan), fade_next);
                 next_head = wrap(next_head + next_step, static_cast<i32>(next_length << 10));
@@ -652,8 +654,8 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
             if (!fragment_remaining && continuous && next_length) {
                 fragment_start = next_start; fragment_length = next_length;
                 fragment_head = next_head; fragment_step = next_step;
-                fragment_total = fragment_length * 3;
-                fragment_remaining = fragment_total - 441;
+                fragment_total = (fragment_length * 3) / 2;
+                fragment_remaining = fragment_total - 220;
                 current_pan = (random_state >> 8) & 16383u;
                 next_length = 0;
             }
@@ -687,8 +689,11 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         // Linear 0 to 1.5x loop gain; wet gain is independent.
         const i32 out_l = clamp16(q15(wet_l, 32767) + lo_l + lo_l / 2);
         const i32 out_r = clamp16(q15(wet_r, 32767) + lo_r + lo_r / 2);
-        left[i] = out_l * 65536;
-        right[i] = out_r * 65536;
+        left[2*i] = ((s.half_previous[0] + out_l) / 2) * 65536;
+        right[2*i] = ((s.half_previous[1] + out_r) / 2) * 65536;
+        left[2*i+1] = out_l * 65536;
+        right[2*i+1] = out_r * 65536;
+        s.half_previous[0] = out_l; s.half_previous[1] = out_r;
     }
     if (mode == 2 && s.captured) {
         saved[2] = s.loop_start; saved[3] = s.loop_length;

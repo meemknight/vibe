@@ -27,6 +27,7 @@ struct State {
     opxy::i32 layer_head, layer_last, layer_fade_from;
     opxy::u32 layer_fade, layer_play_length;
     opxy::u32 tape_phase, loop_pan_phase;
+    opxy::i32 half_previous[2];
     opxy::i32 tape_input_lp[2], tape_record_lp[2];
     opxy::i32 smoothed[7];
     opxy::u32 controls_ready;
