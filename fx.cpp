@@ -16,10 +16,8 @@ const u32 wet_mask = wet_frames - 1;
 const u32 wet_q8_mask = (wet_frames << 8) - 1;
 const u32 rev_mask = reverb_line - 1;
 const i32 tape_rate[] = {-1024, -512, -256, -128, 128, 256, 512, 1024};
-const i32 stretch_rate[] = {-256, -171, -128, -64, 0, 64, 128, 171, 256};
 // The band boundaries and octave speeds follow DigiTide.
 const u32 tape_bands[] = {5, 24, 43, 62, 85, 98, 120};
-const u32 stretch_bands[] = {16, 31, 47, 61, 81, 97, 112, 127};
 const u32 clock_bands[] = {5, 16, 29, 41, 54, 70, 84, 96, 110};
 const u32 clock_rates[] = {2000,3000,4000,6000,8000,12000,16000,24000,32000,44100};
 const u32 grab_ratios[] = {256,271,287,304,323,342,362,384,406,431,456,483,512};
@@ -62,6 +60,15 @@ i32 unpack(u32 word, bool right) {
     const i32 x = static_cast<i32>(right ? word >> 16 : word & 65535u);
     return x >= 32768 ? x - 65536 : x;
 }
+i32 tape_get(Buffer b, u32 frame) {
+    return unpack(static_cast<u32>(b.words[frame >> 1]), (frame & 1u) != 0);
+}
+void tape_put(Buffer b, u32 frame, i32 sample) {
+    const u32 shift = (frame & 1u) * 16u;
+    const u32 mask = 65535u << shift;
+    const u32 old = static_cast<u32>(b.words[frame >> 1]);
+    b.words[frame >> 1] = static_cast<i32>((old & ~mask) | ((static_cast<u32>(clamp16(sample)) & 65535u) << shift));
+}
 i32 wrap(i32 value, i32 length) {
     if (value < 0) value += length;
     if (value >= length) value -= length;
@@ -101,11 +108,10 @@ void loop_read(const State& s, Buffer b, i32 pos, u32 length, i32& l, i32& r) {
     const u32 whole = static_cast<u32>(pos) >> 8;
     const u32 frac = static_cast<u32>(pos) & 255u;
     const u32 next = whole + 1 == length ? 0 : whole + 1;
-    const u32 a = static_cast<u32>(b.words[ring_index(s.loop_start + whole)]);
-    const u32 c = static_cast<u32>(b.words[ring_index(s.loop_start + next)]);
-    const i32 al = unpack(a, false), ar = unpack(a, true);
-    l = al + (((unpack(c, false) - al) * static_cast<i32>(frac)) >> 8);
-    r = ar + (((unpack(c, true) - ar) * static_cast<i32>(frac)) >> 8);
+    const i32 a = tape_get(b, ring_index(s.loop_start + whole));
+    const i32 c = tape_get(b, ring_index(s.loop_start + next));
+    l = a + (((c - a) * static_cast<i32>(frac)) >> 8);
+    r = l;
 }
 
 // Crossfade the end into the beginning, making both directions safe at seams.
@@ -130,6 +136,8 @@ void capture(State& s, u32 wanted) {
     s.loop_start = ring_index(s.ring_write + loop_frames - s.loop_length);
     s.loop_head = s.env_position = s.env_slice = s.env_envelope = s.env_mix = 0;
     s.grain_phase = s.grain_size = s.overdub_position = 0;
+    s.overdub_envelope = s.overdub_mix = 0;
+    s.overdub_active = 0;
     s.grain_start[0] = s.grain_start[1] = 0;
     s.captured = s.loop_length >= 256;
 }
@@ -137,20 +145,20 @@ void capture(State& s, u32 wanted) {
 // ENV, TAPE and STRETCH follow DigiTide's slice hold, octave tape and
 // overlapping triangular grains. Capacity and safety checks are specific to
 // the OP-XY's smaller per-send buffer.
-void looper(State& s, Buffer b, u32 mode, u32 loop_mode, bool spread, u32 length_control,
-            i32 tape_step, i32 stretch_step, i32 threshold,
-            i32 in_l, i32 in_r, i32& out_l, i32& out_r) {
+void looper(State& s, Buffer b, u32 mode, bool spread, u32 length_control,
+            i32 tape_step,
+            i32 input, bool tape_tick, i32& out_l, i32& out_r) {
     out_l = out_r = 0;
     const i32 target_gain = mode && s.captured ? 4096 : 0;
     s.loop_gain = approach(s.loop_gain, target_gain, 16);
     if (!s.captured || !s.loop_length || !s.loop_gain) return;
     u32 len = s.loop_length;
     // Length can shorten an already caught tape, as in DigiTide.
-    if (loop_mode == 0 && length_control < len) len = length_control;
+    if (length_control < len) len = length_control;
     if (len < 256) len = 256;
     const i32 len8 = static_cast<i32>(len << 8);
     if (s.loop_head >= len8 || s.loop_head < 0) s.loop_head = 0;
-    if (loop_mode == 0) {
+    {
         s.loop_head = wrap(s.loop_head + tape_step, len8);
         loop_seam(s, b, s.loop_head, len, out_l, out_r);
         if (spread) {
@@ -158,90 +166,28 @@ void looper(State& s, Buffer b, u32 mode, u32 loop_mode, bool spread, u32 length
             loop_seam(s, b, len8 - 1 - s.loop_head, len, reverse_l, reverse_r);
             out_l = reverse_l;
         }
-    } else if (loop_mode == 2) {
-        const i32 step = stretch_step;
-        const i32 direction = step < 0 ? -1 : 1;
-        u32 grain = 256 + ((length_control - 256) >> 3);
-        if (grain > 4096) grain = 4096;
-        if (grain > len) grain = len;
-        if (!s.grain_size || s.grain_size > len) {
-            s.grain_size = grain;
-            s.grain_weight = 4194304u / grain;
-            s.grain_phase = 0;
-            s.grain_start[0] = s.grain_start[1] = s.loop_head;
-        }
-        const u32 g = s.grain_size;
-        s.loop_head = wrap(s.loop_head + step, len8);
-        for (u32 k = 0; k < 2; ++k) {
-            u32 phase = s.grain_phase + (k ? g / 2 : 0);
-            if (phase >= g) phase -= g;
-            if (!phase) s.grain_start[k] = s.loop_head;
-            const i32 position = wrap(s.grain_start[k] + direction * static_cast<i32>(phase << 8), len8);
-            i32 l, r;
-            loop_seam(s, b, position, len, l, r);
-            const u32 triangle = phase < g / 2 ? phase : g - phase;
-            const i32 gain = static_cast<i32>((triangle * s.grain_weight) >> 9);
-            out_l += (l * gain) >> 12;
-            out_r += (r * gain) >> 12;
-        }
-        if (++s.grain_phase >= g) {
-            s.grain_phase = 0;
-            if (s.grain_size != grain) {
-                s.grain_size = grain;
-                s.grain_weight = 4194304u / grain;
-            }
-        }
-    } else {
-        // Loud input holds the current slice; silence resumes scanning.
-        const i32 a = in_l < 0 ? -in_l : in_l, c = in_r < 0 ? -in_r : in_r;
-        const i32 peak = a > c ? a : c;
-        if (peak > s.env_envelope) s.env_envelope = peak;
-        else if (s.env_envelope) {
-            const i32 decay = s.env_envelope >> 9;
-            s.env_envelope -= decay ? decay : 1;
-        }
-        const u32 slice = 128 + ((length_control - 256) >> 4);
-        const u32 slice_len = slice < len ? slice : len;
-        const i32 slice8 = static_cast<i32>(slice_len << 8);
-        const bool hold = s.env_envelope > threshold;
-        if (hold && !s.env_mix) {
-            const u32 at = static_cast<u32>(s.loop_head) >> 8;
-            s.env_slice = static_cast<i32>((at / slice_len) * slice_len);
-            if (static_cast<u32>(s.env_slice) + slice_len > len)
-                s.env_slice = static_cast<i32>(len - slice_len);
-            s.env_position = s.loop_head - (s.env_slice << 8);
-        }
-        if (hold) {
-            s.env_position += 256;
-            if (s.env_position >= slice8) s.env_position -= slice8;
-        } else {
-            s.loop_head = wrap(s.loop_head + 256, len8);
-        }
-        s.env_mix = approach(s.env_mix, hold ? 4096 : 0, 32);
-        i32 a_l, a_r, b_l, b_r;
-        loop_seam(s, b, s.loop_head, len, a_l, a_r);
-        const i32 held = wrap((s.env_slice << 8) + s.env_position, len8);
-        loop_seam(s, b, held, len, b_l, b_r);
-        out_l = mix12(a_l, b_l, s.env_mix);
-        out_r = mix12(a_r, b_r, s.env_mix);
     }
     out_l = (out_l * s.loop_gain) >> 12;
     out_r = (out_r * s.loop_gain) >> 12;
     if (mode == 3) {
-        // Replace a quarter per pass, but hold the loop when input falls silent.
-        const i32 a = in_l < 0 ? -in_l : in_l, c = in_r < 0 ? -in_r : in_r;
-        const i32 peak = a > c ? a : c;
+        // Gate very quiet input with hysteresis, then fade the write level to
+        // avoid clicks. The envelope retains short gaps between notes.
+        const i32 peak = input < 0 ? -input : input;
         if (peak > s.overdub_envelope) s.overdub_envelope = peak;
         else if (s.overdub_envelope)
-            s.overdub_envelope -= (s.overdub_envelope >> 5) ? (s.overdub_envelope >> 5) : 1;
-        const u32 at = ring_index(s.loop_start + s.overdub_position);
-        if (s.overdub_envelope > 16) {
-            const u32 old = static_cast<u32>(b.words[at]);
-            const i32 l = q15(unpack(old, false), 24576) + q15(in_l, 8192);
-            const i32 r = q15(unpack(old, true), 24576) + q15(in_r, 8192);
-            b.words[at] = static_cast<i32>(pack(l, r));
+            s.overdub_envelope -= (s.overdub_envelope >> 9) ? (s.overdub_envelope >> 9) : 1;
+        if (!s.overdub_active && s.overdub_envelope >= 128) s.overdub_active = 1;
+        if (s.overdub_active && s.overdub_envelope < 64) s.overdub_active = 0;
+        s.overdub_mix = approach(s.overdub_mix, s.overdub_active ? 16384 : 0, 32);
+        if (s.overdub_position >= len) s.overdub_position = 0;
+        if (tape_tick) {
+            const u32 at = ring_index(s.loop_start + s.overdub_position);
+            if (s.overdub_mix) {
+                const i32 old = tape_get(b, at);
+                tape_put(b, at, old + q15(input - old, s.overdub_mix));
+            }
+            if (++s.overdub_position >= len) s.overdub_position = 0;
         }
-        if (++s.overdub_position >= s.loop_length) s.overdub_position = 0;
     }
 }
 
@@ -356,30 +302,40 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         return;
     }
     const bool wet_ready = clear_wet(s, b);
-    const u32 wet_mode = choice(p[5], 3), loop_mode = choice(p[6], 3);
-    const u32 mode = choice(p[7], 4);
+    const u32 wet_mode = choice(p[5], 3);
+    const u32 mode = choice(p[6], 4);
     const u32 options = choice(p[1], 3);
     const bool smooth_clock = false, spread = options != 0;
     const u32 step = clock_step(32767, smooth_clock);
     const i32 targets[7] = {32767, static_cast<i32>(control(p[0])),
                             static_cast<i32>(control(p[2])), static_cast<i32>(control(p[3])),
-                            static_cast<i32>(control(p[4])), 32767,
+                            static_cast<i32>(control(p[4])), static_cast<i32>(control(p[7])),
                             static_cast<i32>(step >> 1)};
     if (!s.controls_ready) {
         for (u32 k = 0; k < 7; ++k) s.smoothed[k] = targets[k];
         s.controls_ready = 1;
         s.previous_wet_mode = wet_mode;
-        s.previous_loop_mode = loop_mode;
     }
     for (u32 k = 0; k < 4; ++k) s.smoothed[k] = smooth_block(s.smoothed[k], targets[k]);
+    s.smoothed[5] = smooth_block(s.smoothed[5], targets[5]);
     s.smoothed[6] = smooth_block(s.smoothed[6], targets[6]);
+    // A slow triangle LFO runs once per block. Motion zero leaves the
+    // original sound untouched; depth and speed grow together.
+    const u32 motion = static_cast<u32>(s.smoothed[5]);
+    s.motion_phase += 500000u + (motion * 88u);
+    const u32 phase = s.motion_phase >> 16;
+    const i32 triangle = static_cast<i32>(phase < 32768 ? phase * 2 : (65535 - phase) * 2) - 32768;
+    const i32 movement = q15(triangle, static_cast<i32>(motion));
+    i32 wet_moving = s.smoothed[1] + (movement * 2500) / 32768;
+    if (wet_moving < 0) wet_moving = 0;
+    if (wet_moving > 32767) wet_moving = 32767;
     // Coefficients follow the smoothed knobs once per block, not eight line
     // multiplications per sample.
     if (wet_mode == 0) {
         const u32 reverb_size = 18000u + ((static_cast<u32>(s.smoothed[0]) * 14000u) >> 15);
         for (u32 k = 0; k < 8; ++k) s.reverb_lengths[k] = (rev_lengths[k] * reverb_size) >> 15;
         s.reverb_feedback = 18000 + ((s.smoothed[0] * 13500) >> 15);
-        s.reverb_diffusion = (s.smoothed[1] * 5) >> 3;
+        s.reverb_diffusion = (wet_moving * 5) >> 3;
     }
     // Stop/restart is observable; the effect API cannot identify a double tap.
     if (!transport.playing && s.was_playing) {
@@ -387,40 +343,38 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         s.loop_gain = 0;
     }
     s.was_playing = transport.playing ? 1u : 0u;
-    if (mode == 1 && s.previous_mode != 1 && !s.captured) {
+    if ((mode == 1 || mode == 3) && s.previous_mode != mode && !s.captured) {
         s.ring_valid = 0; s.listening = 0;
+    }
+    if (mode != 3 && s.previous_mode == 3) {
+        s.overdub_envelope = s.overdub_mix = 0;
+        s.overdub_active = 0;
     }
     if (wet_mode != s.previous_wet_mode) {
         s.transition = 256;
         s.previous_wet_mode = wet_mode;
         if (wet_mode == 2) s.grab_counter = 0;
     }
-    if (loop_mode != s.previous_loop_mode) {
-        s.grain_size = s.grain_phase = 0;
-        s.env_mix = 0;
-        s.previous_loop_mode = loop_mode;
-    }
     s.previous_mode = mode;
-    const u32 length = 1764 + ((static_cast<u32>(s.smoothed[2]) * 76000u) >> 15);
+    const u32 length_knob = static_cast<u32>(s.smoothed[2]);
+    const u32 length = 1323 + length_knob * 4u + ((length_knob * 21205u) >> 15);
     const u32 wet_time = 882 + ((static_cast<u32>(s.smoothed[0]) * 31000u) >> 15);
     const u32 loop_modify = static_cast<u32>(s.smoothed[3]);
-    const i32 tape_step = tape_rate[band(loop_modify, tape_bands, 7)];
-    const i32 stretch_step = stretch_rate[band(loop_modify, stretch_bands, 8)];
-    const i32 threshold = loop_modify < 256 ? 65535 :
-        16000 - static_cast<i32>((loop_modify * 15500u) >> 15);
-    const u32 wet_modify = static_cast<u32>(s.smoothed[1]);
+    const i32 tape_base = tape_rate[band(loop_modify, tape_bands, 7)];
+    const i32 tape_step = (tape_base + (tape_base * movement) / 262144) / 2;
+    const u32 wet_modify = static_cast<u32>(wet_moving);
     const i32 feedback = static_cast<i32>((wet_modify * 32112u) >> 15);
-    const u32 k = (wet_modify * 128u) >> 15;
+    const u32 k = (static_cast<u32>(s.smoothed[1]) * 128u) >> 15;
     const u32 semitone = k >= 64 ? ((k - 64) * 13) >> 6 : ((63 - k) * 13) >> 6;
-    const i32 grab_rate = k >= 64 ? static_cast<i32>(grab_ratios[semitone]) :
+    const i32 grab_base = k >= 64 ? static_cast<i32>(grab_ratios[semitone]) :
                                     -static_cast<i32>(grab_ratios[semitone]);
+    const i32 grab_rate = grab_base + (grab_base * movement) / 262144;
     const u32 grab_period = 1102 + (wet_time >> 2);
     const u32 wet_spread_step = spread && wet_mode == 2 ? 2147483647u / grab_period : 0;
     const u32 clock = smooth_clock ? static_cast<u32>(s.smoothed[6]) * 2u : step;
     const i32 filter = clock >= 65534 ? 4096 : static_cast<i32>(clock >> 4);
     for (u32 i = 0; i < opxy::block_frames; ++i) {
         if (s.smoothed[4] != targets[4]) s.smoothed[4] = smooth_control(s.smoothed[4], targets[4]);
-        if (s.smoothed[5] != targets[5]) s.smoothed[5] = smooth_control(s.smoothed[5], targets[5]);
         const i32 in_l = left[i] >> 17, in_r = right[i] >> 17;
         // One-pole anti-alias filtering before clock reduction, as in DigiTide.
         if (clock >= 65534) {
@@ -434,17 +388,15 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         if (s.clock_phase >= 65536) {
             s.clock_phase -= 65536;
             const i32 x_l = s.input_lp[0], x_r = s.input_lp[1];
-            if (mode >= 2 && !s.captured && s.ring_valid >= 256) capture(s, length);
+            const i32 mono = (x_l + x_r) / 2;
+            s.tape_input_lp[0] += (mono - s.tape_input_lp[0]) / 2;
+            s.tape_input_lp[1] += (s.tape_input_lp[0] - s.tape_input_lp[1]) / 2;
+            s.tape_phase ^= 1u;
+            const bool tape_tick = s.tape_phase == 0;
+            if (mode == 2 && !s.captured && s.ring_valid >= 256) capture(s, length);
             i32 loop_l = 0, loop_r = 0;
-            looper(s, b, mode, loop_mode, spread, length, tape_step, stretch_step, threshold,
-                   x_l, x_r, loop_l, loop_r);
-            if (spread && loop_mode != 0) {
-                s.spread_phase += 25000u;
-                const u32 wave = s.spread_phase >> 16;
-                const i32 pan = static_cast<i32>(wave < 32768 ? wave : 65535 - wave);
-                loop_l = q15(loop_l, 32767 - pan / 2);
-                loop_r = q15(loop_r, 16384 + pan / 2);
-            }
+            looper(s, b, mode, spread, length, tape_step,
+                   s.tape_input_lp[1], tape_tick, loop_l, loop_r);
             const i32 feed_l = x_l, feed_r = x_r;
             i32 wet_l = 0, wet_r = 0;
             if (wet_ready) {
@@ -485,30 +437,30 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
                 loop_r = clamp16(loop_mid - loop_side - loop_side / 2);
             }
             if (!mode && s.captured && !s.loop_gain) s.captured = 0;
+            const i32 record_mono = (x_l + x_r) / 2 + (wet_l + wet_r) / 4;
+            s.tape_record_lp[0] += (record_mono - s.tape_record_lp[0]) / 2;
+            s.tape_record_lp[1] += (s.tape_record_lp[0] - s.tape_record_lp[1]) / 2;
             if (!s.captured && transport.playing) {
-                const i32 a = x_l < 0 ? -x_l : x_l, c = x_r < 0 ? -x_r : x_r;
-                if (mode != 1 || a > 16 || c > 16) s.listening = 1;
-                if (s.listening) {
+                const i32 level = s.tape_input_lp[1] < 0 ? -s.tape_input_lp[1] : s.tape_input_lp[1];
+                if ((mode != 1 && mode != 3) || level > 128) s.listening = 1;
+                if (s.listening && tape_tick) {
                     // Record the incoming signal and some of the wet sound,
                     // just as DigiTide listens to the pedal's output.
-                    b.words[s.ring_write] = static_cast<i32>(pack(x_l + wet_l / 2, x_r + wet_r / 2));
+                    tape_put(b, s.ring_write, s.tape_record_lp[1]);
                     s.ring_write = ring_index(s.ring_write + 1);
                     if (s.ring_valid < loop_frames) ++s.ring_valid;
-                    if (mode == 1 && s.ring_valid >= length) capture(s, length);
+                    if ((mode == 1 || mode == 3) && s.ring_valid >= length) capture(s, length);
                 }
             }
             s.wet_hold[0] = wet_l; s.wet_hold[1] = wet_r;
             s.loop_hold[0] = loop_l; s.loop_hold[1] = loop_r;
         }
-        const i32 balance = s.smoothed[4];
-        const i32 wet_gain = balance < 16384 ? 32767 : (32767 - balance) * 2;
-        const i32 loop_gain = balance >= 16384 ? 32767 : balance * 2;
+        const i32 loop_gain = s.smoothed[4];
+        const i32 wet_gain = 32767;
         const i32 lo_l = q15(s.loop_hold[0], loop_gain), lo_r = q15(s.loop_hold[1], loop_gain);
-        // Above centre, increase the loop from unity to 1.5x while the wet
-        // return fades out. Saturate only after mixing both channels.
-        const i32 boost = balance > 16384 ? balance - 16384 : 0;
-        const i32 out_l = clamp16(q15(s.wet_hold[0], wet_gain) + lo_l + q15(lo_l, boost));
-        const i32 out_r = clamp16(q15(s.wet_hold[1], wet_gain) + lo_r + q15(lo_r, boost));
+        // Linear 0 to 1.5x loop gain; wet gain is independent.
+        const i32 out_l = clamp16(q15(s.wet_hold[0], wet_gain) + lo_l + lo_l / 2);
+        const i32 out_r = clamp16(q15(s.wet_hold[1], wet_gain) + lo_r + lo_r / 2);
         if (clock < 65534) {
             s.output_lp[0] += ((out_l - s.output_lp[0]) * filter) >> 12;
             s.output_lp[1] += ((out_r - s.output_lp[1]) * filter) >> 12;

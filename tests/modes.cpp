@@ -10,8 +10,8 @@ static i32 option(u32 i, u32 n) {
 }
 static void controls() {
     std::memset(p, 0, sizeof(p));
-    p[4] = 2147483647; p[7] = 2147483647;
-    p[5] = option(1, 3); p[6] = option(0, 3); p[7] = option(1, 4);
+    p[4] = 2147483647; p[7] = 0;
+    p[5] = option(1, 3); p[6] = option(1, 4);
 }
 static i32 signal(u32 i) {
     const i32 phase = static_cast<i32>(i & 63u);
@@ -33,7 +33,7 @@ static bool capture() {
     return state.captured != 0;
 }
 static int crossings(u32 speed) {
-    p[6] = option(0,3); p[3] = option(speed,8);
+    p[3] = option(speed,8);
     u32 phase = 0;
     for (u32 i = 0; i < 100; ++i) run(false,phase); // settle the control
     int crossings = 0;
@@ -52,27 +52,12 @@ static bool loop_modes() {
     const int one = crossings(5), two = crossings(6);
     if (one < 80 || two < one * 3 / 2 || two > one * 5 / 2)
         return failure("tape speed does not change pitch by an octave");
-    p[6] = option(2,3); p[3] = option(4,8);
-    u32 phase = 0;
-    for (u32 i = 0; i < 150; ++i) run(false,phase);
-    const i32 head = state.loop_head;
-    bool heard = false;
-    for (u32 i = 0; i < 20; ++i) {
-        run(false,phase);
-        for (u32 j = 0; j < 64; ++j) heard |= left[j] > 1000000 || left[j] < -1000000;
-    }
-    if (state.loop_head != head || !heard) return failure("stretch stall must hold an audible position");
-    p[6] = option(1,3); p[3] = 2147483647;
-    for (u32 i = 0; i < 160; ++i) run(true,phase);
-    if (!state.env_mix) return failure("env did not hold on input");
-    for (u32 i = 0; i < 180; ++i) run(false,phase);
-    if (state.env_mix) return failure("env did not release on silence");
     return true;
 }
 static bool wet_modes() {
     for (u32 mode = 0; mode < 3; ++mode) {
         std::memset(mem,0,sizeof(mem)); vibe::initialize(state); controls();
-        p[7] = option(0,4); p[4] = 0; p[5] = option(mode,3);
+        p[6] = option(0,4); p[4] = 0; p[5] = option(mode,3);
         p[0] = 1073741824;
         u32 phase = 0;
         for (u32 i = 0; i < 130; ++i) run(false,phase); // clear the wet memory

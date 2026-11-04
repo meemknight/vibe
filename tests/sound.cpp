@@ -19,16 +19,16 @@ static i32 option(unsigned value, unsigned count) {
 static void defaults() {
     std::memset(controls, 0, sizeof(controls));
     controls[3] = option(5, 8);
+    controls[7] = 0;
     controls[4] = max_word;
-    controls[7] = max_word;
+    controls[6] = max_word;
     controls[5] = option(1, 3); // delay
-    controls[6] = option(0, 3); // tape
-    controls[7] = option(0, 4);
+    controls[6] = option(0, 4);
 }
 static void block(vibe::State& state, i32* memory, bool playing, i32 sample) {
     for (unsigned i = 0; i < 64; ++i) {
         left[i] = sample;
-        right[i] = -sample;
+        right[i] = sample;
     }
     vibe::process(state, {memory + 1, vibe::used_words}, {1200, 0, playing}, left, right, controls);
 }
@@ -63,11 +63,11 @@ static bool auto_capture_and_stop() {
     defaults();
     std::memset(memory_a, 0, sizeof(memory_a));
     vibe::initialize(state_a);
-    controls[7] = option(1, 4);
+    controls[6] = option(1, 4);
     for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 0);
     if (!check(!state_a.captured && !state_a.ring_valid, "auto captured silence")) return false;
-    for (unsigned k = 0; k < 40; ++k) block(state_a, memory_a, true, 536870912);
-    if (!check(state_a.captured && state_a.loop_length == 1764, "auto did not capture full loop")) return false;
+    for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 536870912);
+    if (!check(state_a.captured && state_a.loop_length == 1323, "auto did not capture full loop")) return false;
     bool heard = false;
     for (unsigned k = 0; k < 10; ++k) {
         block(state_a, memory_a, true, 0);
@@ -84,52 +84,89 @@ static bool hold_overdub_and_independence() {
     std::memset(memory_a, 0, sizeof(memory_a));
     std::memset(memory_b, 0, sizeof(memory_b));
     vibe::initialize(state_a); vibe::initialize(state_b);
-    for (unsigned k = 0; k < 40; ++k) block(state_a, memory_a, true, 268435456);
-    controls[7] = option(2, 4);
+    for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 268435456);
+    controls[6] = option(2, 4);
     block(state_a, memory_a, true, 0);
-    if (!check(state_a.captured && state_a.loop_length == 1764, "hold did not catch recent audio")) return false;
-    const u32 index = state_a.loop_start + 1;
-    const i32 before = memory_a[index];
-    controls[7] = option(3, 4);
-    for (unsigned k = 0; k < 40; ++k) block(state_a, memory_a, true, 1073741824);
-    if (!check(memory_a[index] != before, "overdub did not update recorded audio")) return false;
-    if (!check(vibe::unpack(static_cast<u32>(memory_a[index]), false) -
-               vibe::unpack(static_cast<u32>(before), false) > 1000,
+    if (!check(state_a.captured && state_a.loop_length == 1323, "hold did not catch recent audio")) return false;
+    const u32 index = vibe::ring_index(state_a.loop_start + 1);
+    const i32 before = vibe::tape_get({memory_a + 1, vibe::used_words}, index);
+    controls[6] = option(3, 4);
+    for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 1073741824);
+    if (!check(vibe::tape_get({memory_a + 1, vibe::used_words}, index) != before, "overdub did not update recorded audio")) return false;
+    if (!check(vibe::tape_get({memory_a + 1, vibe::used_words}, index) -
+               before > 1000,
                "overdub is too quiet after one pass")) return false;
-    for (unsigned k = 0; k < 40; ++k) block(state_a, memory_a, true, 0);
-    const i32 after_silence = memory_a[index];
-    for (unsigned k = 0; k < 40; ++k) block(state_a, memory_a, true, 0);
-    if (!check(memory_a[index] == after_silence, "overdub erased a loop during silence")) return false;
-    const i32 after = memory_a[index];
+    for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 0);
+    const i32 after_silence = vibe::tape_get({memory_a + 1, vibe::used_words}, index);
+    for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 0);
+    if (!check(vibe::tape_get({memory_a + 1, vibe::used_words}, index) == after_silence, "overdub erased a loop during silence")) return false;
+    const i32 after = vibe::tape_get({memory_a + 1, vibe::used_words}, index);
     for (unsigned k = 0; k < 4; ++k) block(state_b, memory_b, false, 0);
     return check(state_a.captured && !state_b.captured && !state_b.ring_valid &&
-                 memory_a[index] == after, "send states or buffers shared");
+                 vibe::tape_get({memory_a + 1, vibe::used_words}, index) == after, "send states or buffers shared");
 }
 static bool long_capture_wraps() {
     defaults();
     std::memset(memory_a, 0, sizeof(memory_a));
     vibe::initialize(state_a);
     controls[2] = max_word;
-    for (unsigned k = 0; k < 1300; ++k) block(state_a, memory_a, true, 268435456);
+    for (unsigned k = 0; k < 4900; ++k) block(state_a, memory_a, true, 268435456);
     if (!check(state_a.ring_valid == vibe::loop_frames && state_a.ring_write < vibe::loop_frames,
                "long recording ring did not wrap safely")) return false;
-    controls[7] = option(2, 4);
+    controls[6] = option(2, 4);
     block(state_a, memory_a, true, 0);
-    return check(state_a.captured && state_a.loop_length > 77000,
+    return check(state_a.captured && state_a.loop_length > 153000,
                  "long capture did not retain the requested history");
+}
+static bool overdub_waits_for_input() {
+    defaults();
+    std::memset(memory_a, 0, sizeof(memory_a));
+    vibe::initialize(state_a);
+    controls[6] = option(3, 4);
+    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 64 * 131072);
+    if (!check(!state_a.captured && !state_a.ring_valid, "overdub captured quiet input")) return false;
+    for (unsigned k = 0; k < 20; ++k) block(state_a, memory_a, true, 268435456);
+    if (!check(!state_a.captured, "overdub captured before full length")) return false;
+    for (unsigned k = 0; k < 30; ++k) block(state_a, memory_a, true, 268435456);
+    if (!check(state_a.captured && state_a.loop_length == 1323, "overdub initial capture differs from auto")) return false;
+    for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 0);
+    const u32 index = vibe::ring_index(state_a.loop_start + 1);
+    const i32 before = vibe::tape_get({memory_a + 1, vibe::used_words}, index);
+    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 64 * 131072);
+    return check(vibe::tape_get({memory_a + 1, vibe::used_words}, index) == before, "quiet input modified the loop");
+}
+static bool mono_and_filtering() {
+    defaults();
+    std::memset(memory_a, 0, sizeof(memory_a));
+    vibe::initialize(state_a);
+    // Opposite-polarity stereo cancels in the mono tape path.
+    for (unsigned k = 0; k < 20; ++k) {
+        for (unsigned i = 0; i < 64; ++i) { left[i] = 536870912; right[i] = -536870912; }
+        vibe::process(state_a, {memory_a + 1, vibe::used_words}, {1200,0,true}, left, right, controls);
+    }
+    if (!check(vibe::tape_get({memory_a + 1, vibe::used_words}, 300) == 0,
+               "stereo input did not fold down to mono")) return false;
+    // Nyquist-rate alternating input should be attenuated before decimation.
+    std::memset(memory_a, 0, sizeof(memory_a));
+    vibe::initialize(state_a);
+    for (unsigned k = 0; k < 20; ++k) {
+        for (unsigned i = 0; i < 64; ++i) left[i] = right[i] = (i & 1) ? 536870912 : -536870912;
+        vibe::process(state_a, {memory_a + 1, vibe::used_words}, {1200,0,true}, left, right, controls);
+    }
+    const i32 filtered = vibe::tape_get({memory_a + 1, vibe::used_words}, 300);
+    return check(filtered > -1000 && filtered < 1000, "downsampling filter did not suppress high frequencies");
 }
 static bool modes_and_extremes() {
     defaults();
     std::memset(memory_a, 0, sizeof(memory_a));
     vibe::initialize(state_a);
-    controls[7] = option(1, 4);
-    for (unsigned k = 0; k < 35; ++k) block(state_a, memory_a, true, 536870912);
+    controls[6] = option(1, 4);
+    for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 536870912);
     if (!check(state_a.captured, "mode test could not capture")) return false;
     u32 random = 7;
     for (unsigned wet = 0; wet < 3; ++wet)
-      for (unsigned loop = 0; loop < 3; ++loop)
         for (unsigned setting = 0; setting < 4; ++setting) {
-            controls[5] = option(wet, 3); controls[6] = option(loop, 3);
+            controls[5] = option(wet, 3);
             controls[1] = option(setting % 3, 3);
             controls[0] = setting & 2 ? max_word : 0;
             controls[3] = setting & 1 ? max_word : 0;
@@ -147,7 +184,8 @@ static bool modes_and_extremes() {
 }
 int main() {
     if (!startup_and_delay() || !auto_capture_and_stop() ||
-        !hold_overdub_and_independence() || !long_capture_wraps() || !modes_and_extremes()) return 1;
+        !hold_overdub_and_independence() || !long_capture_wraps() ||
+        !overdub_waits_for_input() || !mono_and_filtering() || !modes_and_extremes()) return 1;
     std::puts("Vibe sound checks passed");
     return 0;
 }

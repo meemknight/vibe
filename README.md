@@ -10,30 +10,23 @@ Press any encoder to switch between the two rows.
 
 | Encoder | Page 1 | Page 2 |
 | --- | --- | --- |
-| 1 | Wet Mod | Loop Vol |
-| 2 | Options | Wet Mode |
-| 3 | Length | LoopMode |
-| 4 | Loop Spd | Looper |
+| 1 | Vibe Prm | Loop Vol |
+| 2 | Options | Vibe |
+| 3 | Length | Looper |
+| 4 | Loop Spd | Motion |
 
-- **Wet mode:** Reverb (an eight-line feedback network), Delay or Grab
-  (a retriggered variable-speed fragment). Time is fixed at 100%. Wet Mod sets diffusion, feedback or grab
+- **Vibe:** Reverb (an eight-line feedback network), Delay or Grab
+  (a retriggered variable-speed fragment). Time is fixed at 100%. Vibe Prm sets diffusion, feedback or grab
   pitch/direction respectively.
-- **Loop mode:** Tape changes speed and direction in octave steps; Env holds
-  a slice while incoming sound exceeds its threshold; Stretch moves through
-  overlapping grains, including reverse and stalled positions. Length sets
-  capture duration and adjusts slice/grain length; Tape can shorten a capture.
-  Loop Spd selects tape speed, Env sensitivity or Stretch progress.
+- **Tape loop:** Loop Spd changes playback speed and direction in octave steps. Length sets capture duration and can shorten a captured loop.
 The wet channel always processes the incoming send; the loop plays alongside it.
 
-- **Loop Vol:** at centre both channels are at unity; turning left reduces
-  the loop, and turning right fades the wet channel while boosting the loop
-  up to 1.5x. High levels can saturate the effect return. The OP-XY send level governs how much signal enters Vibe;
-  stock retains the source's dry signal.
-- **Options:** Normal, Wide or X Wide (stronger stereo spread). Wide changes reverb width, makes Delay ping-pong and pans Grab; Tape plays the left loop backwards and Env/Stretch pan the loop.
+- **Loop Vol** adjusts only the loop, from silence to 1.5x; about 67% is unity. High levels can saturate the effect return.
+- **Motion** adds a slow, repeating drift to tape playback speed and the selected Vibe effect. Higher settings make the movement deeper and faster. At zero, the sound is steady. The wet return is fixed at unity; the OP-XY send controls the input level and stock retains the dry signal. The loop captures input plus some wet signal.
+- **Options:** Normal, Wide or X Wide (stronger stereo spread). Wide changes reverb width, makes Delay ping-pong and pans Grab; Tape plays the left loop backwards.
 - **Looper:** Off (the default) listens while transport plays but does not play a loop.
   Auto waits for audible input, records a Length-sized capture and loops it.
-  Hold catches the most recent available audio and holds it. Overdub adds
-  input at 25% per pass while fading existing material to prevent runaway gain.
+  Hold catches the most recent available audio and holds it. Overdub starts like Auto, then gradually replaces the captured audio with new input. It ignores very quiet input and smoothly fades recording in and out; short gaps can still be recorded.
   Select Off and then Hold to catch another passage.
 
 Stop clears the capture; restart begins listening afresh. The SDK exposes
@@ -43,9 +36,10 @@ and is not saved in projects.
 
 ## Memory and limits
 
-Vibe requests 524,288 bytes of per-send scratch memory, matching the SDK's
-per-effect limit. The loop ring holds 79,872 stereo 16-bit frames and its
-longest selectable capture is about 1.76 seconds at 44.1 kHz. The shared
+Vibe requests 516,096 bytes of per-send scratch memory, 8 KiB below the SDK's
+per-effect limit. The loop ring holds 155,648 mono 16-bit frames at 22.05 kHz,
+with a selectable capture from about 60 ms to 6.97 seconds. A low-pass filter
+precedes recording, and stereo playback options are applied to the mono loop. The shared
 Delay/Grab history holds 32,768 stereo frames. The reverb's
 eight lines and input allpasses occupy the rest. The wet memory is cleared
 in bounded steps after reset, so its output begins after roughly 0.15 seconds.

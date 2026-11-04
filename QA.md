@@ -29,7 +29,7 @@ Record the machine revision, SDK revision and firmware image for each full pass.
 
 ## Its page and controls
 
-- [ ] Wet Mod, Options, Length, Loop Spd and Loop Vol through their whole ranges, both directions: the sound follows, with no clicks, jumps or
+- [ ] Vibe Prm, Options, Length, Loop Spd, Loop Vol and Motion through their whole ranges, both directions: the sound follows, with no clicks, jumps or
       silence at the ends; the value shown reads in its unit (Hz, ms, %, a name)
 - [ ] Choice controls move one choice per detent, both directions, and wrap or stop as the page says
 - [ ] Fast turns: the value keeps up, no flicker or slowdown
@@ -43,21 +43,21 @@ Record the machine revision, SDK revision and firmware image for each full pass.
 
 ## Sound and capture
 
-- [ ] The second page selects Wet Mode, LoopMode and Looper;
+- [ ] Check mono tape recording with stereo input, maximum Length, overdub, and Wide/X Wide playback.
+
+- [ ] The second page selects Vibe Prme and Looper;
       each shows its own name and setting.
-- [ ] Reverb, Delay and Grab sound distinct; Wet Mod does what the README says; Time remains fixed at maximum.
+- [ ] Reverb, Delay and Grab sound distinct; Vibe Prm does what the README says; Time remains fixed at maximum.
 - [ ] Options switches between Normal, Wide and X Wide; check
       stereo behavior on each wet/loop mode.
 - [ ] With Looper Off, play a phrase, select Hold, then listen to the caught
       phrase. Turn Tape's Loop Spd through forward and reverse speeds.
 - [ ] Select Off, play a new phrase and select Hold again: the new material
-      is heard. Repeat with Env and check that input holds/releases a slice.
-- [ ] Stretch can move forward, reverse and stall without losing its loop.
+      is heard.
 - [ ] Auto waits for input, captures after Length, and plays the result;
       silence at the start must not produce a silent locked loop.
-- [ ] Overdub adds new input gradually, without a large jump or runaway level.
-- [ ] Check Loop Vol with both
-      channels sounding. Check the stereo result on headphones.
+- [ ] Overdub waits for audible input and captures a full Length like Auto; it gradually replaces the loop during new input without a large jump. Quiet input does not trigger or rewrite it.
+- [ ] Check Loop Vol with both channels sounding. Test Motion at zero and high settings with each Vibe mode and both loop directions. Check the stereo result on headphones.
 - [ ] Stop and restart: the previous loop is cleared and capture restarts.
       Wet effect tails may continue; check that they do not click.
 - [ ] Put Vibe on both sends, use different modes/captures, then change one:
@@ -121,8 +121,9 @@ Once the machine's catalog entry is merged and released (the beta site from `sta
 
 ## Known limits
 
-- The loop is at most about 1.76 seconds.
+- The loop is at most about 6.97 seconds.
 - Any transition to stopped clears the loop; double Stop cannot be detected.
 - A new effect takes about 0.15 seconds to initialize its wet scratch.
 - MIDI note control, separate freeze, ramping and most hidden pedal settings
   are not provided. Hardware CPU and sound have not yet been measured.
+

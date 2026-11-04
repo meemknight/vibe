@@ -6,7 +6,7 @@
   "parameters": [
     {
       "id": "wetmod",
-      "label": "Wet Mod",
+      "label": "Vibe Prm",
       "default": 0.35,
       "mapping": {
         "kind": "linear",
@@ -54,7 +54,7 @@
     {
       "id": "balance",
       "label": "Loop Vol",
-      "default": 0.5,
+      "default": 0.6666667,
       "mapping": {
         "kind": "linear",
         "minimum": 0,
@@ -64,7 +64,7 @@
     },
     {
       "id": "wetmode",
-      "label": "Wet Mode",
+      "label": "Vibe",
       "default": 0,
       "mapping": {
         "kind": "enum",
@@ -72,20 +72,6 @@
           "Reverb",
           "Delay",
           "Grab"
-        ]
-      },
-      "display": "enum"
-    },
-    {
-      "id": "loopmode",
-      "label": "LoopMode",
-      "default": 0,
-      "mapping": {
-        "kind": "enum",
-        "labels": [
-          "Tape",
-          "Env",
-          "Stretch"
         ]
       },
       "display": "enum"
@@ -104,11 +90,22 @@
         ]
       },
       "display": "enum"
+    },
+    {
+      "id": "motion",
+      "label": "Motion",
+      "default": 0,
+      "mapping": {
+        "kind": "linear",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "display": "percent"
     }
   ],
   "presets": {},
   "resources": {
-    "bufferBytes": 524288,
+    "bufferBytes": 516096,
     "transport": 1
   }
 }
