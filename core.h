@@ -4,9 +4,9 @@
 namespace vibe {
 // The scratch buffer belongs to the send slot, not the effect. Positions count
 // words written since initialize; unwritten ring data is never read.
-const opxy::u32 loop_frames = 44100; // three seconds of mono at 14.7 kHz
-const opxy::u32 layer_base = loop_frames, layer_frames = 22050;
-const opxy::u32 history_base = layer_base + layer_frames, history_frames = 89454;
+const opxy::u32 loop_frames = 33076; // three seconds of mono at 11.025 kHz
+const opxy::u32 layer_base = loop_frames, layer_frames = 16538;
+const opxy::u32 history_base = layer_base + layer_frames, history_frames = 67092;
 const opxy::u32 wet_frames = 32768;
 const opxy::u32 reverb_line = 2048;
 const opxy::u32 allpass_line = 512;

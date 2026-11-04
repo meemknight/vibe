@@ -67,7 +67,7 @@ static bool auto_capture_and_stop() {
     for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 0);
     if (!check(!state_a.captured && !state_a.ring_valid, "auto captured silence")) return false;
     for (unsigned k = 0; k < 90; ++k) block(state_a, memory_a, true, 536870912);
-    if (!check(state_a.captured && state_a.loop_length >= 1764 && state_a.tape_length == 882, "auto did not start with the requested playback length")) return false;
+    if (!check(state_a.captured && state_a.loop_length >= 1323 && state_a.tape_length == 662, "auto did not start with the requested playback length")) return false;
     bool heard = false;
     for (unsigned k = 0; k < 10; ++k) {
         block(state_a, memory_a, true, 0);
@@ -86,7 +86,7 @@ static bool auto_starts_before_full_capture() {
     controls[7] = max_word; // maximum Length
     controls[3] = option(1, 4); // Auto
     for (unsigned k = 0; k < 700; ++k) block(state_a, memory_a, true, 536870912);
-    if (!check(state_a.captured && state_a.loop_length >= 14700 && state_a.loop_length < 15500,
+    if (!check(state_a.captured && state_a.loop_length >= 11025 && state_a.loop_length < 11625,
                "Auto did not start after one third of the selected length")) return false;
     bool audible = false;
     for (unsigned k = 0; k < 20; ++k) {
@@ -95,7 +95,7 @@ static bool auto_starts_before_full_capture() {
     }
     if (!check(audible, "Auto initial loop was silent")) return false;
     for (unsigned k = 0; k < 2050; ++k) block(state_a, memory_a, true, 268435456);
-    return check(state_a.captured && state_a.loop_length == 44100,
+    return check(state_a.captured && state_a.loop_length == vibe::loop_frames,
                  "Auto did not finish recording the requested length");
 }
 static bool hold_overdub_and_independence() {
@@ -106,7 +106,7 @@ static bool hold_overdub_and_independence() {
     controls[3] = option(2, 4);
     for (unsigned k = 0; k < 90; ++k) block(state_a, memory_a, true, 268435456);
     block(state_a, memory_a, true, 0);
-    if (!check(state_a.captured && state_a.loop_length >= 1764, "hold did not record audio")) return false;
+    if (!check(state_a.captured && state_a.loop_length >= 1323, "hold did not record audio")) return false;
     const u32 index = vibe::ring_index(state_a.loop_start + 1);
     const i32 before = vibe::tape_get({memory_a + 1, vibe::used_words}, index);
     controls[3] = option(3, 4);
@@ -171,7 +171,7 @@ static bool long_capture_wraps() {
     block(state_a, memory_a, true, 0);
     for (u32 i = vibe::loop_frames / 2; i < vibe::history_base / 2; ++i)
         if (!check(memory_a[i + 1] == 0x12345678, "reserved tape memory was overwritten")) return false;
-    return check(state_a.captured && state_a.loop_length == 44100,
+    return check(state_a.captured && state_a.loop_length == vibe::loop_frames,
                  "long capture did not retain the requested history");
 }
 static bool overdub_waits_for_input() {
@@ -184,7 +184,7 @@ static bool overdub_waits_for_input() {
     for (unsigned k = 0; k < 20; ++k) block(state_a, memory_a, true, 268435456);
     if (!check(!state_a.captured, "overdub captured before full length")) return false;
     for (unsigned k = 0; k < 70; ++k) block(state_a, memory_a, true, 268435456);
-    if (!check(state_a.captured && state_a.loop_length >= 1764, "overdub did not start recording")) return false;
+    if (!check(state_a.captured && state_a.loop_length >= 1323, "overdub did not start recording")) return false;
     for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 0);
     const u32 index = vibe::ring_index(state_a.loop_start + 1);
     const i32 before = vibe::tape_get({memory_a + 1, vibe::used_words}, index);
@@ -241,7 +241,7 @@ static bool fragments_history_and_stop() {
     for (unsigned k = 0; k < 250; ++k) {
         block(state_a, memory_a, true, 268435456);
         triggered |= state[4] != 0;
-        if (state[4] && !check(state[3] >= 1764 && state[3] <= 17640, "fragment length outside safe range")) return false;
+        if (state[4] && !check(state[3] >= 1323 && state[3] <= 13230, "fragment length outside safe range")) return false;
         for (unsigned i = 0; i < 64; ++i) audible |= left[i] > 1000000;
     }
     if (!check(triggered && audible, "fragment did not replay recorded history")) return false;

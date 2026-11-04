@@ -30,8 +30,8 @@ Stop clears Auto's loop and the Fragment history. Hold's loop remains in the sen
 ## Memory and limits
 
 Vibe requests 516,096 bytes of per-send scratch memory, 8 KiB below the SDK's
-per-effect limit. The active loop ring holds 44,100 mono 16-bit frames at 14.7 kHz,
-with a selectable capture from about 60 ms to 3 seconds. The overdub layer uses another 22,050 frames (44,100 bytes). The remaining tape storage holds about 6.09 seconds of rolling history for Fragment and a small amount of bookkeeping. A low-pass filter
+per-effect limit. The active loop ring holds 33,076 mono 16-bit frames at 11.025 kHz,
+with a selectable capture from about 60 ms to 3 seconds. The overdub layer uses another 16,538 frames (33,076 bytes). The remaining tape storage holds about 6.09 seconds of rolling history for Fragment and a small amount of bookkeeping. A low-pass filter
 precedes recording, and stereo playback options are applied to the mono loop. The shared
 Delay/Grab/Flanger/Chorus history holds 32,768 stereo frames. The reverb uses eight feedback lines and input allpasses. The wet memory is cleared
 in bounded steps after reset, so its output begins after roughly 0.15 seconds.
