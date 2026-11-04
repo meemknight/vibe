@@ -236,6 +236,15 @@ void wet_tap(Buffer b, u32 position, i32& l, i32& r) {
     r = ar + (((unpack(second, true) - ar) * static_cast<i32>(frac)) >> 8);
 }
 
+// Modulation uses only the mono sample in the low half of each word.
+i32 wet_tap_mono(Buffer b, u32 position) {
+    const u32 a = (position >> 8) & wet_mask;
+    const u32 frac = position & 255u;
+    const i32 first = unpack(static_cast<u32>(b.words[wet_base + a]), false);
+    const i32 second = unpack(static_cast<u32>(b.words[wet_base + ((a + 1) & wet_mask)]), false);
+    return first + (((second - first) * static_cast<i32>(frac)) >> 8);
+}
+
 // Delay taps always address whole samples; interpolation would read a
 // second word only to multiply it by zero.
 void wet_tap_whole(Buffer b, u32 position, i32& l, i32& r) {
@@ -259,7 +268,7 @@ void reverb(State& s, Buffer b, i32 in_l, i32 in_r, i32& l, i32& r) {
     const i32 diffusion = s.reverb_diffusion;
     const i32 feedback = s.reverb_feedback;
     const i32 xl = allpass(s, b, 1, allpass(s, b, 0, in_l / 2, diffusion), diffusion);
-    const i32 xr = allpass(s, b, 3, allpass(s, b, 2, in_r / 2, diffusion), diffusion);
+    (void)in_r;
     i32 y[8], sum = 0;
     for (u32 k = 0; k < 8; ++k) {
         const u32 index = (s.reverb_write - s.reverb_lengths[k]) & rev_mask;
@@ -273,11 +282,11 @@ void reverb(State& s, Buffer b, i32 in_l, i32 in_r, i32& l, i32& r) {
         // Halving before multiplication keeps the feedback product in i32.
         const i32 feedback_sample = (((y[k] - sum) >> 1) * feedback) >> 14;
         b.words[reverb_base + k * reverb_line + s.reverb_write] =
-            clamp16(feedback_sample + ((k & 1) ? xr : xl));
+            clamp16(feedback_sample + xl);
     }
     s.reverb_write = (s.reverb_write + 1) & rev_mask;
-    l = clamp16((y[0] + y[2] + y[4] + y[6]) / 2);
-    r = clamp16((y[1] + y[3] + y[5] + y[7]) / 2);
+    l = clamp16((y[0] + y[1] + y[2] + y[3] + y[4] + y[5] + y[6] + y[7]) / 4);
+    r = l;
 }
 
 void delay(State& s, Buffer b, u32 target, i32 feedback, u32 spread,
@@ -298,14 +307,12 @@ void delay(State& s, Buffer b, u32 target, i32 feedback, u32 spread,
     }
     // Damp high frequencies in the feedback path, as DigiTide does.
     s.delay_lp[0] += ((l - s.delay_lp[0]) * 2048) >> 12;
-    s.delay_lp[1] += ((r - s.delay_lp[1]) * 2048) >> 12;
-    const i32 cross = q15(s.delay_lp[1] - s.delay_lp[0], static_cast<i32>(spread));
-    const i32 write_l = in_l + q15(s.delay_lp[0] + cross, feedback);
-    const i32 write_r = in_r + q15(s.delay_lp[1] - cross, feedback);
-    b.words[wet_base + s.wet_write] = static_cast<i32>(pack(write_l, write_r));
+    (void)spread; (void)in_r;
+    const i32 write_l = in_l + q15(s.delay_lp[0], feedback);
+    b.words[wet_base + s.wet_write] = static_cast<i32>(pack(write_l, write_l));
     s.wet_write = (s.wet_write + 1) & wet_mask;
     if (s.wet_valid < wet_frames) ++s.wet_valid;
-    l = s.delay_lp[0]; r = s.delay_lp[1];
+    l = s.delay_lp[0]; r = l;
 }
 
 // DigiTide's GRAB repeatedly jumps a variable-speed head behind the write
@@ -377,12 +384,11 @@ void modulation(State& s, Buffer b, u32 mode, u32 knob, u32 spread,
     // Phaser/flanger: knob sets rate. Chorus: fixed rate, variable depth.
     s.modulation_phase += mode == 5 ? 164000u : 80000u + knob * 20u;
     const u32 wave_l = modulation_wave(s.modulation_phase);
-    const u32 wave_r = modulation_wave(s.modulation_phase + (mode == 5 ? 0x80000000u : spread << 16));
+    (void)spread; (void)in_r;
     if (mode == 3) {
-        i32 values[2] = {clamp16(in_l + q15(s.phaser_feedback[0], 20000)),
-                         clamp16(in_r + q15(s.phaser_feedback[1], 20000))};
-        const u32 waves[2] = {wave_l, wave_r};
-        for (u32 c = 0; c < 2; ++c) {
+        i32 values[1] = {clamp16(in_l + q15(s.phaser_feedback[0], 20000))};
+        const u32 waves[1] = {wave_l};
+        for (u32 c = 0; c < 1; ++c) {
             // This allpass form needs negative coefficients to sweep its
             // phase transition through bass and midrange frequencies.
             const i32 coefficient = -32300 + static_cast<i32>((waves[c] * 26000u) >> 15);
@@ -396,25 +402,22 @@ void modulation(State& s, Buffer b, u32 mode, u32 knob, u32 spread,
         // Emphasize the moving phase difference in the send return, so the
         // sweep remains audible alongside the host's retained dry signal.
         l = clamp16(values[0] * 2 - in_l);
-        r = clamp16(values[1] * 2 - in_r);
+        r = l;
     } else {
         const u32 depth = mode == 4 ? 180u : 250u + ((knob * 650u) >> 15);
         const u32 base = mode == 4 ? 6u : 220u;
         u32 lag_l = (base << 8) + ((wave_l * depth) >> 7);
-        u32 lag_r = (base << 8) + ((wave_r * depth) >> 7);
         if (mode == 5) {
             // Slew the read heads, including when depth is adjusted, so the
             // recorded waveform is never jumped to a distant position.
-            if (!s.chorus_lag[0]) { s.chorus_lag[0] = static_cast<i32>(lag_l); s.chorus_lag[1] = static_cast<i32>(lag_r); }
+            if (!s.chorus_lag[0]) s.chorus_lag[0] = static_cast<i32>(lag_l);
             s.chorus_lag[0] = approach(s.chorus_lag[0], static_cast<i32>(lag_l), 16);
-            s.chorus_lag[1] = approach(s.chorus_lag[1], static_cast<i32>(lag_r), 16);
-            lag_l = static_cast<u32>(s.chorus_lag[0]); lag_r = static_cast<u32>(s.chorus_lag[1]);
+            lag_l = static_cast<u32>(s.chorus_lag[0]);
         }
-        i32 dl, discard, dr;
-        wet_tap(b, ((s.wet_write << 8) - lag_l) & wet_q8_mask, dl, discard);
-        wet_tap(b, ((s.wet_write << 8) - lag_r) & wet_q8_mask, discard, dr);
+        const i32 dl = wet_tap_mono(b, ((s.wet_write << 8) - lag_l) & wet_q8_mask);
+        const i32 dr = dl;
         const i32 feedback = mode == 4 ? 25000 : 0;
-        b.words[wet_base + s.wet_write] = static_cast<i32>(pack(in_l + q15(dl, feedback), in_r + q15(dr, feedback)));
+        b.words[wet_base + s.wet_write] = static_cast<i32>(pack(in_l + q15(dl, feedback), in_l + q15(dl, feedback)));
         s.wet_write = (s.wet_write + 1) & wet_mask;
         if (mode == 5) { l = dl * 3 / 4; r = dr * 3 / 4; }
         else { l = clamp16(dl + dl / 2); r = clamp16(dr + dr / 2); }
@@ -549,7 +552,6 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         }
     }
     const u32 grab_period = 551 + (wet_time >> 2);
-    const u32 wet_spread_step = spread && wet_mode == 2 ? 2147483647u / grab_period : 0;
     const i32 history_tape_gain = density > 16384 ? 32767 - static_cast<i32>((density - 16384) * 13 / 10) : 32767;
     const u32 active_looper = transport.playing ? mode : 0;
     for (u32 i = 0; i < opxy::block_frames / 2; ++i) {
@@ -576,7 +578,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
             loop_l = q15(loop_l, 32767 - loop_pan);
             loop_r = q15(loop_r, 32767 + loop_pan);
         }
-        const i32 feed_l = x_l, feed_r = x_r;
+        const i32 feed_l = (x_l + x_r) / 2, feed_r = feed_l;
         i32 wet_l = 0, wet_r = 0;
         if (wet_ready) {
             if (wet_mode == 0)
@@ -595,21 +597,6 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         } else {
             s.previous_wet[0] = wet_l;
             s.previous_wet[1] = wet_r;
-        }
-        if (spread && wet_mode == 0) {
-            const i32 mid = (wet_l + wet_r) / 2, side = (wet_l - wet_r) / 2;
-            const i32 extra = q15(side, static_cast<i32>(spread)) / 2;
-            wet_l = clamp16(mid + side + extra);
-            wet_r = clamp16(mid - side - extra);
-        }
-        if (spread && wet_mode == 2) {
-            s.wet_spread_phase += wet_spread_step;
-            const u32 wave = s.wet_spread_phase >> 16;
-            const i32 pan = static_cast<i32>(wave < 32768 ? wave : 65535 - wave);
-            const i32 pan_amount = q15(pan / 2, static_cast<i32>(spread));
-            const i32 other_amount = q15(16383 - pan / 2, static_cast<i32>(spread));
-            wet_l = q15(wet_l, 32767 - pan_amount);
-            wet_r = q15(wet_r, 32767 - other_amount);
         }
         if (spread) {
             // Gradually emphasize stereo sides; high settings can saturate.

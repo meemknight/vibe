@@ -44,7 +44,7 @@ static bool moving_loop_pan() {
 }
 int main() {
     const auto wide=measure(1), extra=measure(2);
-    if (!wide || extra <= wide) { std::puts("Extra Wide did not increase stereo separation"); return 1; }
+    if (wide || extra) { std::puts("Mono wet path unexpectedly differs between channels"); return 1; }
     if (!moving_loop_pan()) { std::puts("Tape did not pan across stereo"); return 1; }
     return 0;
 }

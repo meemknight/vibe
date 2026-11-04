@@ -1,6 +1,6 @@
 # Vibe
 
-Vibe is a stereo send effect for the OP-XY SDK. It adapts DigiTide's
+Vibe is a send effect for the OP-XY SDK, with a mono wet path and stereo tape movement. It adapts DigiTide's
 fixed-point wet and micro-loop algorithms to the OP-XY. Vibe is independent
 of Chase Bliss and does not contain MOOD MKII source code.
 
@@ -22,7 +22,7 @@ The wet channel always processes the incoming send; the loop plays alongside it.
 
 - **Loop Vol** adjusts only the loop, from silence to 1.5x; about 67% is unity. High levels can saturate the effect return.
 - **Fragment:** records a rolling history of the incoming mono audio while transport plays, even at zero. While Looper is active, below 50%, it adds occasional randomly timed fragments from recent history to the loop return. Above 50%, the history plays continuously with crossfaded random selections, while the original tape is gradually reduced. Fragment size varies with Length (120 ms–1.2 seconds); playback waits for about one second of recorded history. Fragments follow Loop Spd with occasional octave and direction changes and random stereo placement. Loop Vol controls their level. The fragments bypass the Vibe effect; Stop clears the history.
-- **Spread:** continuously increases stereo width and gradually adds slow left–right panning to the tape and overdub layer. It also adjusts Delay cross-feedback, Grab panning, and Phaser/Flanger stereo sweep offsets. Chorus already moves its channels in opposite directions. High settings can saturate the return.
+- **Spread:** continuously increases stereo width and gradually adds slow left–right panning to the tape and overdub layer. The Vibe effect return is mono. High settings can saturate the return.
 - **Looper:** Off clears the loop. Auto clears the previous loop, waits for audible input and begins looping after 120 ms to one second depending on Length; it continues recording until the full three-second buffer is ready, independently of Length. Hold keeps the current capture across Stop and effect reset. When empty, Hold records like Auto and then keeps that capture. Overdub records a separate layer up to 1.5 seconds long, regardless of Length and gradually refreshes it with new audible input. Switching to Hold keeps both layers.
 
 Stop clears Auto's loop and the Fragment history. Hold's loop remains in the send slot's scratch memory and resumes on playback; selecting Off or Auto clears it. Scratch memory can be overwritten by another effect and is not saved to projects or guaranteed across power cycles. The SDK exposes play state but not a double-Stop gesture, so Vibe cannot distinguish the first Stop from a double press.

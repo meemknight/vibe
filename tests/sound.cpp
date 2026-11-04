@@ -46,16 +46,16 @@ static bool startup_and_delay() {
         for (unsigned i = 0; i < 64; ++i)
             if (!check(left[i] == 0 && right[i] == 0, "stale memory audible")) return false;
     }
-    left[0] = 1073741824; right[0] = -1073741824;
+    left[0] = 1073741824; right[0] = 0;
     for (unsigned i = 1; i < 64; ++i) left[i] = right[i] = 0;
     vibe::process(state_a, {memory_a + 1, vibe::used_words}, {1200,0,true}, left, right, controls);
     bool echo = false;
     for (unsigned k = 0; k < 520; ++k) {
         block(state_a, memory_a, true, 0);
         for (unsigned i = 0; i < 64; ++i)
-            if (left[i] > 1000000 && right[i] < -1000000) echo = true;
+            if (left[i] > 1000000 && right[i] > 1000000) echo = true;
     }
-    return check(echo, "delay does not return stereo impulse") &&
+    return check(echo, "delay does not return mono impulse in both channels") &&
            check(memory_a[0] == 0x5a5a5a5a && memory_a[vibe::used_words + 1] == 0x5a5a5a5a,
                  "buffer boundary overwritten");
 }

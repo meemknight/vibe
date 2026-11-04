@@ -114,7 +114,7 @@ static bool modulation_return_is_wet() {
     }
     return true;
 }
-static bool chorus_has_stereo_motion() {
+static bool chorus_is_mono() {
     std::memset(mem, 0, sizeof(mem)); vibe::initialize(state); controls();
     p[3] = option(0,4); p[5] = 0; p[4] = option(5,6); p[0] = 1073741824;
     u32 phase = 0; bool differs = false;
@@ -125,7 +125,7 @@ static bool chorus_has_stereo_motion() {
             if (difference > 500 || difference < -500) differs = true;
         }
     }
-    return differs || failure("chorus has no audible stereo modulation");
+    return !differs || failure("chorus wet output is not mono");
 }
 static bool chorus_depth_changes_smoothly() {
     std::memset(mem, 0, sizeof(mem)); vibe::initialize(state);
@@ -164,4 +164,4 @@ static bool phaser_sweep_audible(double frequency) {
     }
     return high > low * 3 / 2 || failure("phaser sweep is too weak in a dry-plus-send mix");
 }
-int main() { return loop_modes() && wet_modes() && reverb_tail() && modulation_controls() && modulation_return_is_wet() && chorus_has_stereo_motion() && chorus_depth_changes_smoothly() && phaser_sweep_audible(220.0) && phaser_sweep_audible(1200.0) ? 0 : 1; }
+int main() { return loop_modes() && wet_modes() && reverb_tail() && modulation_controls() && modulation_return_is_wet() && chorus_is_mono() && chorus_depth_changes_smoothly() && phaser_sweep_audible(220.0) && phaser_sweep_audible(1200.0) ? 0 : 1; }
