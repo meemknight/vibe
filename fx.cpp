@@ -136,7 +136,7 @@ void capture(State& s, u32 wanted) {
     s.loop_start = ring_index(s.ring_write + loop_frames - s.loop_length);
     s.loop_head = 0;
     s.overdub_position = 0;
-    s.layer_length = s.loop_length < layer_frames ? s.loop_length : layer_frames;
+    s.layer_length = layer_frames;
     s.layer_valid = 0; s.layer_head = 0;
     s.overdub_envelope = s.overdub_mix = 0;
     s.overdub_active = 0;
@@ -194,10 +194,12 @@ void looper(State& s, Buffer b, u32 mode, u32 spread, u32 length_control,
             --s.tape_fade;
         }
     }
-    if (s.layer_valid == s.layer_length && s.layer_length >= 256) {
-        const i32 layer_span = static_cast<i32>(s.layer_length << 10);
+    u32 layer_play = s.layer_valid < len ? s.layer_valid : len;
+    if (layer_play >= 256) {
+        const i32 layer_span = static_cast<i32>(layer_play << 10);
+        if (s.layer_head >= layer_span || s.layer_head < 0) s.layer_head = 0;
         s.layer_head = wrap(s.layer_head + tape_step, layer_span);
-        const i32 layer_r = layer_sample(b, s.layer_head, s.layer_length);
+        const i32 layer_r = layer_sample(b, s.layer_head, layer_play);
         out_l = clamp16(out_l + layer_r / 2);
         out_r = clamp16(out_r + layer_r / 2);
     }
@@ -250,31 +252,31 @@ i32 allpass(State& s, Buffer b, u32 line, i32 x, i32 gain) {
     return clamp16(previous + q15(next, gain));
 }
 
-// A four-line Householder feedback network and two
+// DigiTide/DigiPrism's eight-line Householder feedback network and two
 // input allpasses per side, with smaller lines to fit the OP-XY scratch.
 void reverb(State& s, Buffer b, i32 in_l, i32 in_r, i32& l, i32& r) {
     const i32 diffusion = s.reverb_diffusion;
     const i32 feedback = s.reverb_feedback;
     const i32 xl = allpass(s, b, 1, allpass(s, b, 0, in_l / 2, diffusion), diffusion);
     const i32 xr = allpass(s, b, 3, allpass(s, b, 2, in_r / 2, diffusion), diffusion);
-    i32 y[4], sum = 0;
-    for (u32 k = 0; k < 4; ++k) {
+    i32 y[8], sum = 0;
+    for (u32 k = 0; k < 8; ++k) {
         const u32 index = (s.reverb_write - s.reverb_lengths[k]) & rev_mask;
         const i32 x = b.words[reverb_base + k * reverb_line + index];
         s.reverb_lp[k] += ((x - s.reverb_lp[k]) * 20000) >> 15;
         y[k] = s.reverb_lp[k];
         sum += y[k];
     }
-    sum >>= 1; // 2/N for a four-line Householder reflection
-    for (u32 k = 0; k < 4; ++k) {
+    sum >>= 2;
+    for (u32 k = 0; k < 8; ++k) {
         // Halving before multiplication keeps the feedback product in i32.
         const i32 feedback_sample = (((y[k] - sum) >> 1) * feedback) >> 14;
         b.words[reverb_base + k * reverb_line + s.reverb_write] =
             clamp16(feedback_sample + ((k & 1) ? xr : xl));
     }
     s.reverb_write = (s.reverb_write + 1) & rev_mask;
-    l = clamp16(y[0] + y[2]);
-    r = clamp16(y[1] + y[3]);
+    l = clamp16((y[0] + y[2] + y[4] + y[6]) / 2);
+    r = clamp16((y[1] + y[3] + y[5] + y[7]) / 2);
 }
 
 void delay(State& s, Buffer b, u32 target, i32 feedback, u32 spread,
@@ -437,6 +439,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         s.loop_start = saved[2]; s.loop_length = saved[3];
         s.ring_valid = saved[3]; s.ring_write = ring_index(saved[2] + saved[3]);
         s.layer_length = saved[4]; s.layer_valid = saved[5]; s.captured = 1;
+        s.overdub_position = saved[5] < saved[4] ? saved[5] : 0;
     }
     // Fragment bookkeeping occupies sixteen words at the end of scratch, outside
     // the rolling audio ring; initialize before reading any prior contents.
@@ -478,7 +481,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     // multiplications per sample.
     if (wet_mode == 0) {
         const u32 reverb_size = 18000u + ((static_cast<u32>(s.smoothed[0]) * 14000u) >> 15);
-        for (u32 k = 0; k < 4; ++k) s.reverb_lengths[k] = (rev_lengths[k] * reverb_size) >> 15;
+        for (u32 k = 0; k < 8; ++k) s.reverb_lengths[k] = (rev_lengths[k] * reverb_size) >> 15;
         s.reverb_feedback = 18000 + ((s.smoothed[0] * 13500) >> 15);
         s.reverb_diffusion = (wet_moving * 5) >> 3;
     }
@@ -498,7 +501,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     if ((mode == 1 || mode == 2 || mode == 3) && s.previous_mode != mode && !s.captured) {
         s.ring_valid = 0; s.listening = 0;
     }
-    if (mode != 1 && mode != 2) auto_filling = 0;
+    if (mode == 0) auto_filling = 0;
     if (mode == 2 && s.previous_mode != mode && s.captured) auto_filling = 0;
     if (mode != 3 && s.previous_mode == 3) {
         s.overdub_envelope = s.overdub_mix = 0;
@@ -515,7 +518,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     const u32 length = 882 + ((length_knob * 43220u) >> 15);
     // A longer requested loop gets a larger safe initial capture, while even
     // the shortest loop waits for at least 120 ms of incoming audio.
-    const u32 initial_capture = (mode == 1 || mode == 2) && !s.captured && length > 5292 ? length / 3 : 1764;
+    const u32 initial_capture = mode != 0 && !s.captured && length > 5292 ? length / 3 : 1764;
     const u32 wet_time = 882 + ((static_cast<u32>(s.smoothed[0]) * 31000u) >> 15);
     const u32 loop_modify = static_cast<u32>(s.smoothed[3]);
     const i32 tape_base = tape_rate[band(loop_modify, tape_bands, 7)];
@@ -677,17 +680,14 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
                     tape_put(b, s.ring_write, s.tape_record_lp[1]);
                     s.ring_write = ring_index(s.ring_write + 1);
                     if (s.ring_valid < loop_frames) ++s.ring_valid;
-                    if ((mode == 1 || mode == 2) && !s.captured && s.ring_valid >= initial_capture) {
+                    if (!s.captured && s.ring_valid >= initial_capture) {
                         // Start from a valid portion, then continue writing
                         // until the chosen length is available.
-                        capture(s, length);
-                        auto_filling = s.ring_valid < length;
-                    } else if ((mode == 1 || mode == 2) && auto_filling && s.ring_valid >= length) {
+                        capture(s, s.ring_valid);
+                        auto_filling = s.ring_valid < loop_frames;
+                    } else if (auto_filling) {
                         s.loop_length = s.ring_valid;
-                        s.layer_length = s.loop_length < layer_frames ? s.loop_length : layer_frames;
-                        auto_filling = 0;
-                    } else if (mode == 3 && !s.captured && s.ring_valid >= length) {
-                        capture(s, length);
+                        if (s.ring_valid >= loop_frames) auto_filling = 0;
                     }
                 }
             }
