@@ -27,9 +27,9 @@
       "display": "percent"
     },
     {
-      "id": "length",
-      "label": "Length",
-      "default": 0.4,
+      "id": "fragments",
+      "label": "Fragment",
+      "default": 0,
       "mapping": {
         "kind": "linear",
         "minimum": 0,
@@ -92,9 +92,9 @@
       "display": "percent"
     },
     {
-      "id": "fragments",
-      "label": "Fragment",
-      "default": 0,
+      "id": "length",
+      "label": "Length",
+      "default": 0.4,
       "mapping": {
         "kind": "linear",
         "minimum": 0,

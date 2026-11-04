@@ -11,7 +11,7 @@ static i32 option(u32 i, u32 n) {
 }
 static void controls() {
     std::memset(p, 0, sizeof(p));
-    p[5] = 2147483647; p[7] = 0;
+    p[5] = 2147483647; p[2] = 0;
     p[4] = option(1, 6); p[3] = option(1, 4);
 }
 static i32 signal(u32 i) {

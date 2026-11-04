@@ -12,8 +12,8 @@ Press any encoder to switch between the two rows.
 | --- | --- | --- |
 | 1 | Vibe Prm | Vibe |
 | 2 | Loop Spd | Loop Vol |
-| 3 | Length | Spread |
-| 4 | Looper | Fragment |
+| 3 | Fragment | Spread |
+| 4 | Looper | Length |
 
 - **Vibe:** Reverb (an eight-line feedback network), Delay, Grab (a retriggered variable-speed fragment), Phaser, Flanger or Chorus. Time is fixed at 100%. Vibe Prm sets diffusion, feedback or grab
   pitch/direction, phaser rate, flanger rate or chorus depth respectively. Phaser, Flanger and Chorus return the modulated signal; the OP-XY retains the dry signal and mixes it with the return.
@@ -21,7 +21,7 @@ Press any encoder to switch between the two rows.
 The wet channel always processes the incoming send; the loop plays alongside it.
 
 - **Loop Vol** adjusts only the loop, from silence to 1.5x; about 67% is unity. High levels can saturate the effect return.
-- **Fragment:** records a rolling history of the incoming mono audio while transport plays, even at zero. Raising it adds randomly timed, short fragments from recent history to the loop return; higher settings make them louder and more frequent. Fragment size varies with Length (120–500 ms); playback waits for about one second of recorded history, and playback follows Loop Spd with a small random speed variation. Loop Vol controls their level. The fragments bypass the Vibe effect; Stop clears the history.
+- **Fragment:** records a rolling history of the incoming mono audio while transport plays, even at zero. Below 50%, it adds occasional randomly timed fragments from recent history to the loop return. Above 50%, the history plays continuously with crossfaded random selections, while the original tape is gradually reduced. Fragment size varies with Length (120 ms–1.2 seconds); playback waits for about one second of recorded history. Fragments follow Loop Spd with occasional octave and direction changes and random stereo placement. Loop Vol controls their level. The fragments bypass the Vibe effect; Stop clears the history.
 - **Spread:** continuously increases stereo width and gradually blends in reverse tape playback on the left. It also adjusts Delay cross-feedback, Grab panning, and Phaser/Flanger stereo sweep offsets. Chorus already moves its channels in opposite directions. High settings can saturate the return.
 - **Looper:** Off (the default) listens while transport plays but does not play a loop.
   Auto waits for audible input, records a Length-sized capture and loops it.

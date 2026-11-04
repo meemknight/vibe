@@ -60,7 +60,7 @@ Record the machine revision, SDK revision and firmware image for each full pass.
 - [ ] Auto waits for input, captures after Length, and plays the result;
       silence at the start must not produce a silent locked loop.
 - [ ] Overdub captures the original like Auto, then records and plays a separate layer up to 1.5 seconds. Verify the original remains, the layer refreshes on audible input, quiet input leaves it intact, and switching to Hold retains both.
-- [ ] Check Loop Vol with both channels sounding. Test Fragment at zero and high settings, in both loop directions and at short Length; listen for clicks and confirm Stop clears its history. Check the stereo result on headphones.
+- [ ] Check Loop Vol with both channels sounding. Test Fragment below and above 50%: occasional playback becomes continuous with smooth crossfades, and the original tape recedes. Test both loop directions and short Length, and confirm Stop clears history. Check the stereo result on headphones.
 - [ ] Stop and restart: the previous loop is cleared and capture restarts.
       Wet effect tails may continue; check that they do not click.
 - [ ] Put Vibe on both sends, use different modes/captures, then change one:

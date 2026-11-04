@@ -8,7 +8,7 @@ int main() {
     for (unsigned n=0;n<3;++n) {
         vibe::initialize(state[n]);
         p[n][1]=option(5,8); p[n][5]=n==1 ? 0 : 1431655765;
-        p[n][4]=option(1,6); p[n][3]=option(1,4); p[n][7]=n==2 ? 2147483647 : 0;
+        p[n][4]=option(1,6); p[n][3]=option(1,4); p[n][2]=n==2 ? 2147483647 : 0;
     }
     bool differs=false, wet=false;
     for (unsigned block=0;block<1000;++block) {

@@ -19,7 +19,7 @@ static i32 option(unsigned value, unsigned count) {
 static void defaults() {
     std::memset(controls, 0, sizeof(controls));
     controls[1] = option(5, 8);
-    controls[7] = 0;
+    controls[2] = 0;
     controls[5] = max_word;
     controls[3] = max_word;
     controls[4] = option(1, 6); // delay
@@ -110,7 +110,7 @@ static bool long_capture_wraps() {
     defaults();
     std::memset(memory_a, 0, sizeof(memory_a));
     vibe::initialize(state_a);
-    controls[2] = max_word;
+    controls[7] = max_word;
     for (u32 i = vibe::loop_frames / 2; i < vibe::history_base / 2; ++i) memory_a[i + 1] = 0x12345678;
     for (unsigned k = 0; k < 2200; ++k) block(state_a, memory_a, true, 268435456);
     if (!check(state_a.ring_valid == vibe::loop_frames && state_a.ring_write < vibe::loop_frames,
@@ -176,10 +176,10 @@ static bool layer_playback() {
 static bool fragments_history_and_stop() {
     defaults(); std::memset(memory_a, 0, sizeof(memory_a)); vibe::initialize(state_a);
     for (unsigned k = 0; k < 150; ++k) block(state_a, memory_a, true, 268435456);
-    const u32 base = vibe::wet_base - 10 + 1;
+    const u32 base = vibe::wet_base - 16 + 1;
     u32* state = reinterpret_cast<u32*>(memory_a + base);
     if (!check(state[1] > 2048 && state[4] == 0, "history or zero-density behavior wrong")) return false;
-    controls[7] = max_word;
+    controls[2] = max_word;
     for (unsigned k = 0; k < 450; ++k) {
         block(state_a, memory_a, true, 268435456);
         if (!check(state[4] == 0, "fragment started before enough history")) return false;
@@ -188,10 +188,14 @@ static bool fragments_history_and_stop() {
     for (unsigned k = 0; k < 250; ++k) {
         block(state_a, memory_a, true, 268435456);
         triggered |= state[4] != 0;
-        if (state[4] && !check(state[3] >= 1764 && state[3] <= 7350, "fragment length outside safe range")) return false;
+        if (state[4] && !check(state[3] >= 1764 && state[3] <= 17640, "fragment length outside safe range")) return false;
         for (unsigned i = 0; i < 64; ++i) audible |= left[i] > 1000000;
     }
     if (!check(triggered && audible, "fragment did not replay recorded history")) return false;
+    for (unsigned k = 0; k < 1000; ++k) {
+        block(state_a, memory_a, true, 268435456);
+        if (!check(state[4] != 0, "continuous history tape stopped between fragments")) return false;
+    }
     block(state_a, memory_a, false, 0);
     return check(state[1] == 0 && state[4] == 0, "stop retained fragment history");
 }
