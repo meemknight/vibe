@@ -25,7 +25,7 @@ struct State {
     opxy::i32 tape_old_head;
     opxy::u32 overdub_position, layer_length, layer_valid;
     opxy::i32 layer_head;
-    opxy::u32 clock_phase, tape_phase;
+    opxy::u32 clock_phase, tape_phase, loop_pan_phase;
     opxy::i32 tape_input_lp[2], tape_record_lp[2];
     opxy::i32 input_lp[2], wet_hold[2], loop_hold[2], output_lp[2];
     opxy::i32 smoothed[7];

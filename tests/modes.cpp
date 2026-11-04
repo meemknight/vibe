@@ -72,6 +72,20 @@ static bool wet_modes() {
     }
     return true;
 }
+static bool reverb_tail() {
+    std::memset(mem, 0, sizeof(mem)); vibe::initialize(state); controls();
+    p[3] = option(0,4); p[5] = 0; p[4] = option(0,6); p[0] = 1073741824;
+    u32 phase = 0;
+    for (u32 i = 0; i < 140; ++i) run(false, phase);
+    for (u32 i = 0; i < 200; ++i) run(true, phase);
+    bool tail = false;
+    for (u32 i = 0; i < 350; ++i) {
+        run(false, phase);
+        if (i > 100) for (u32 j = 0; j < 64; ++j)
+            tail |= left[j] > 100000 || left[j] < -100000;
+    }
+    return tail || failure("reverb tail ended prematurely");
+}
 static bool modulation_controls() {
     for (u32 mode = 3; mode < 6; ++mode) {
         long long signatures[2] = {};
@@ -150,4 +164,4 @@ static bool phaser_sweep_audible(double frequency) {
     }
     return high > low * 3 / 2 || failure("phaser sweep is too weak in a dry-plus-send mix");
 }
-int main() { return loop_modes() && wet_modes() && modulation_controls() && modulation_return_is_wet() && chorus_has_stereo_motion() && chorus_depth_changes_smoothly() && phaser_sweep_audible(220.0) && phaser_sweep_audible(1200.0) ? 0 : 1; }
+int main() { return loop_modes() && wet_modes() && reverb_tail() && modulation_controls() && modulation_return_is_wet() && chorus_has_stereo_motion() && chorus_depth_changes_smoothly() && phaser_sweep_audible(220.0) && phaser_sweep_audible(1200.0) ? 0 : 1; }

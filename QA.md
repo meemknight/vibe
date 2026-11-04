@@ -52,7 +52,7 @@ Record the machine revision, SDK revision and firmware image for each full pass.
 - [ ] The second page selects Vibe Prme and Looper;
       each shows its own name and setting.
 - [ ] Reverb, Delay, Grab, Phaser, Flanger and Chorus sound distinct with the dry source audible; Vibe Prm does what the README says; Time remains fixed at maximum.
-- [ ] Sweep Spread smoothly from minimum to maximum; check stereo behavior on each Vibe mode and the tape loop.
+- [ ] Sweep Spread smoothly from minimum to maximum; check stereo behavior on each Vibe mode and the tape loop, including smooth left–right movement.
 - [ ] From Off, select Hold and play a phrase: it waits for input, records and loops it. Turn Loop Spd through forward and reverse speeds.
 - [ ] Select Off and then Hold again: silence does not restore the old loop; a new phrase is captured.
 - [ ] Auto waits for input, starts after 120 ms to one second depending on Length and transitions to the selected Length when recorded;

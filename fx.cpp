@@ -161,6 +161,7 @@ i32 layer_sample(Buffer b, i32 pos, u32 length) {
 void looper(State& s, Buffer b, u32 mode, u32 spread, u32 length_control,
             i32 tape_step,
             i32 input, bool tape_tick, i32& out_l, i32& out_r) {
+    (void)spread;
     out_l = out_r = 0;
     const i32 target_gain = mode && s.captured ? 4096 : 0;
     s.loop_gain = approach(s.loop_gain, target_gain, 16);
@@ -182,21 +183,11 @@ void looper(State& s, Buffer b, u32 mode, u32 spread, u32 length_control,
     {
         s.loop_head = wrap(s.loop_head + tape_step, len10);
         loop_seam(s, b, s.loop_head, len, out_l, out_r);
-        if (spread) {
-            i32 reverse_l, reverse_r;
-            loop_seam(s, b, len10 - 1 - s.loop_head, len, reverse_l, reverse_r);
-            out_l += q15(reverse_l - out_l, static_cast<i32>(spread));
-        }
         if (s.tape_fade) {
             const i32 old_len = static_cast<i32>(s.tape_old_length << 10);
             s.tape_old_head = wrap(s.tape_old_head + tape_step, old_len);
             i32 old_l, old_r;
             loop_seam(s, b, s.tape_old_head, s.tape_old_length, old_l, old_r);
-            if (spread) {
-                i32 reverse_l, reverse_r;
-                loop_seam(s, b, old_len - 1 - s.tape_old_head, s.tape_old_length, reverse_l, reverse_r);
-                old_l += q15(reverse_l - old_l, static_cast<i32>(spread));
-            }
             const i32 old_gain = static_cast<i32>(s.tape_fade * 16);
             out_l = mix12(out_l, old_l, old_gain);
             out_r = mix12(out_r, old_r, old_gain);
@@ -207,12 +198,7 @@ void looper(State& s, Buffer b, u32 mode, u32 spread, u32 length_control,
         const i32 layer_span = static_cast<i32>(s.layer_length << 10);
         s.layer_head = wrap(s.layer_head + tape_step, layer_span);
         const i32 layer_r = layer_sample(b, s.layer_head, s.layer_length);
-        i32 layer_l = layer_r;
-        if (spread) {
-            const i32 reverse = layer_sample(b, layer_span - 1 - s.layer_head, s.layer_length);
-            layer_l += q15(reverse - layer_l, static_cast<i32>(spread));
-        }
-        out_l = clamp16(out_l + layer_l / 2);
+        out_l = clamp16(out_l + layer_r / 2);
         out_r = clamp16(out_r + layer_r / 2);
     }
     out_l = (out_l * s.loop_gain) >> 12;
@@ -264,31 +250,31 @@ i32 allpass(State& s, Buffer b, u32 line, i32 x, i32 gain) {
     return clamp16(previous + q15(next, gain));
 }
 
-// DigiTide/DigiPrism's eight-line Householder feedback network and two
+// A four-line Householder feedback network and two
 // input allpasses per side, with smaller lines to fit the OP-XY scratch.
 void reverb(State& s, Buffer b, i32 in_l, i32 in_r, i32& l, i32& r) {
     const i32 diffusion = s.reverb_diffusion;
     const i32 feedback = s.reverb_feedback;
     const i32 xl = allpass(s, b, 1, allpass(s, b, 0, in_l / 2, diffusion), diffusion);
     const i32 xr = allpass(s, b, 3, allpass(s, b, 2, in_r / 2, diffusion), diffusion);
-    i32 y[8], sum = 0;
-    for (u32 k = 0; k < 8; ++k) {
+    i32 y[4], sum = 0;
+    for (u32 k = 0; k < 4; ++k) {
         const u32 index = (s.reverb_write - s.reverb_lengths[k]) & rev_mask;
         const i32 x = b.words[reverb_base + k * reverb_line + index];
         s.reverb_lp[k] += ((x - s.reverb_lp[k]) * 20000) >> 15;
         y[k] = s.reverb_lp[k];
         sum += y[k];
     }
-    sum >>= 2;
-    for (u32 k = 0; k < 8; ++k) {
+    sum >>= 1; // 2/N for a four-line Householder reflection
+    for (u32 k = 0; k < 4; ++k) {
         // Halving before multiplication keeps the feedback product in i32.
         const i32 feedback_sample = (((y[k] - sum) >> 1) * feedback) >> 14;
         b.words[reverb_base + k * reverb_line + s.reverb_write] =
             clamp16(feedback_sample + ((k & 1) ? xr : xl));
     }
     s.reverb_write = (s.reverb_write + 1) & rev_mask;
-    l = clamp16((y[0] + y[2] + y[4] + y[6]) / 2);
-    r = clamp16((y[1] + y[3] + y[5] + y[7]) / 2);
+    l = clamp16(y[0] + y[2]);
+    r = clamp16(y[1] + y[3]);
 }
 
 void delay(State& s, Buffer b, u32 target, i32 feedback, u32 spread,
@@ -482,13 +468,17 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     s.smoothed[5] = smooth_block(s.smoothed[5], targets[5]);
     s.smoothed[6] = smooth_block(s.smoothed[6], targets[6]);
     const u32 spread = static_cast<u32>(s.smoothed[6]);
+    s.loop_pan_phase += 3000000u;
+    const u32 loop_wave = s.loop_pan_phase >> 16;
+    const i32 pan_wave = static_cast<i32>(loop_wave < 32768 ? loop_wave : 65535 - loop_wave) - 16384;
+    const i32 loop_pan = q15(pan_wave / 2, static_cast<i32>(spread));
     const u32 density = static_cast<u32>(s.smoothed[5]);
     const i32 wet_moving = s.smoothed[1];
     // Coefficients follow the smoothed knobs once per block, not eight line
     // multiplications per sample.
     if (wet_mode == 0) {
         const u32 reverb_size = 18000u + ((static_cast<u32>(s.smoothed[0]) * 14000u) >> 15);
-        for (u32 k = 0; k < 8; ++k) s.reverb_lengths[k] = (rev_lengths[k] * reverb_size) >> 15;
+        for (u32 k = 0; k < 4; ++k) s.reverb_lengths[k] = (rev_lengths[k] * reverb_size) >> 15;
         s.reverb_feedback = 18000 + ((s.smoothed[0] * 13500) >> 15);
         s.reverb_diffusion = (wet_moving * 5) >> 3;
     }
@@ -585,6 +575,10 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
             i32 loop_l = 0, loop_r = 0;
             looper(s, b, transport.playing ? mode : 0, spread, length, tape_step,
                    s.tape_input_lp[1], tape_tick, loop_l, loop_r);
+            if (spread) {
+                loop_l = q15(loop_l, 32767 - loop_pan);
+                loop_r = q15(loop_r, 32767 + loop_pan);
+            }
             const i32 feed_l = x_l, feed_r = x_r;
             i32 wet_l = 0, wet_r = 0;
             if (wet_ready) {

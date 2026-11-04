@@ -23,8 +23,28 @@ static unsigned long long measure(unsigned setting) {
     }
     return sides;
 }
+static bool moving_loop_pan() {
+    for (unsigned i=0;i<vibe::used_words;++i) mem[i]=0;
+    vibe::initialize(state);
+    for (unsigned i=0;i<12;++i) p[i]=0;
+    p[1]=opt(5,8); p[3]=opt(2,4); p[4]=opt(1,6);
+    p[5]=1431655765; p[6]=2147483647;
+    state.captured=1; state.loop_length=1764;
+    for (unsigned i=0;i<1764;++i) vibe::tape_put({mem,vibe::used_words},i,4000);
+    bool left_louder=false, right_louder=false;
+    for (unsigned block=0;block<1700;++block) {
+        for (unsigned i=0;i<64;++i) left[i]=right[i]=0;
+        vibe::process(state,{mem,vibe::used_words},{1200,0,true},left,right,p);
+        if (block>10) {
+            left_louder |= (left[0] >> 16) > (right[0] >> 16) + 100;
+            right_louder |= (right[0] >> 16) > (left[0] >> 16) + 100;
+        }
+    }
+    return left_louder && right_louder;
+}
 int main() {
     const auto wide=measure(1), extra=measure(2);
     if (!wide || extra <= wide) { std::puts("Extra Wide did not increase stereo separation"); return 1; }
+    if (!moving_loop_pan()) { std::puts("Tape did not pan across stereo"); return 1; }
     return 0;
 }

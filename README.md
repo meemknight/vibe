@@ -15,14 +15,14 @@ Press any encoder to switch between the two rows.
 | 3 | Fragment | Spread |
 | 4 | Looper | Length |
 
-- **Vibe:** Reverb (an eight-line feedback network), Delay, Grab (a retriggered variable-speed fragment), Phaser, Flanger or Chorus. Time is fixed at 100%. Vibe Prm sets diffusion, feedback or grab
+- **Vibe:** Reverb (a four-line feedback network), Delay, Grab (a retriggered variable-speed fragment), Phaser, Flanger or Chorus. Time is fixed at 100%. Vibe Prm sets diffusion, feedback or grab
   pitch/direction, phaser rate, flanger rate or chorus depth respectively. Phaser, Flanger and Chorus return the modulated signal; the OP-XY retains the dry signal and mixes it with the return.
 - **Tape loop:** Loop Spd changes playback speed and direction in octave steps. Length sets capture duration and can shorten a captured loop.
 The wet channel always processes the incoming send; the loop plays alongside it.
 
 - **Loop Vol** adjusts only the loop, from silence to 1.5x; about 67% is unity. High levels can saturate the effect return.
 - **Fragment:** records a rolling history of the incoming mono audio while transport plays, even at zero. Below 50%, it adds occasional randomly timed fragments from recent history to the loop return. Above 50%, the history plays continuously with crossfaded random selections, while the original tape is gradually reduced. Fragment size varies with Length (120 ms–1.2 seconds); playback waits for about one second of recorded history. Fragments follow Loop Spd with occasional octave and direction changes and random stereo placement. Loop Vol controls their level. The fragments bypass the Vibe effect; Stop clears the history.
-- **Spread:** continuously increases stereo width and gradually blends in reverse tape playback on the left. It also adjusts Delay cross-feedback, Grab panning, and Phaser/Flanger stereo sweep offsets. Chorus already moves its channels in opposite directions. High settings can saturate the return.
+- **Spread:** continuously increases stereo width and gradually adds slow left–right panning to the tape and overdub layer. It also adjusts Delay cross-feedback, Grab panning, and Phaser/Flanger stereo sweep offsets. Chorus already moves its channels in opposite directions. High settings can saturate the return.
 - **Looper:** Off clears the loop. Auto clears the previous loop, waits for audible input and begins looping after 120 ms to one second depending on Length; it continues recording until the selected Length is ready. Hold keeps the current capture across Stop and effect reset. When empty, Hold records like Auto and then keeps that capture. Overdub records a separate layer up to 1.5 seconds long (or the original capture length, if shorter) and gradually refreshes it with new audible input. Switching to Hold keeps both layers.
 
 Stop clears Auto's loop and the Fragment history. Hold's loop remains in the send slot's scratch memory and resumes on playback; selecting Off or Auto clears it. Scratch memory can be overwritten by another effect and is not saved to projects or guaranteed across power cycles. The SDK exposes play state but not a double-Stop gesture, so Vibe cannot distinguish the first Stop from a double press.
@@ -33,8 +33,7 @@ Vibe requests 516,096 bytes of per-send scratch memory, 8 KiB below the SDK's
 per-effect limit. The active loop ring holds 44,100 mono 16-bit frames at 14.7 kHz,
 with a selectable capture from about 60 ms to 3 seconds. The overdub layer uses another 22,050 frames (44,100 bytes). The remaining tape storage holds about 6.09 seconds of rolling history for Fragment and a small amount of bookkeeping. A low-pass filter
 precedes recording, and stereo playback options are applied to the mono loop. The shared
-Delay/Grab/Flanger/Chorus history holds 32,768 stereo frames. The reverb's
-eight lines and input allpasses occupy the rest. The wet memory is cleared
+Delay/Grab/Flanger/Chorus history holds 32,768 stereo frames. The reverb uses four feedback lines and input allpasses; its allocated region retains space for eight lines. The wet memory is cleared
 in bounded steps after reset, so its output begins after roughly 0.15 seconds.
 
 These limits are shorter than DigiTide's original buffers. The sample rate,
