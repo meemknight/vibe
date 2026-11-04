@@ -23,15 +23,9 @@ The wet channel always processes the incoming send; the loop plays alongside it.
 - **Loop Vol** adjusts only the loop, from silence to 1.5x; about 67% is unity. High levels can saturate the effect return.
 - **Fragment:** records a rolling history of the incoming mono audio while transport plays, even at zero. Below 50%, it adds occasional randomly timed fragments from recent history to the loop return. Above 50%, the history plays continuously with crossfaded random selections, while the original tape is gradually reduced. Fragment size varies with Length (120 ms–1.2 seconds); playback waits for about one second of recorded history. Fragments follow Loop Spd with occasional octave and direction changes and random stereo placement. Loop Vol controls their level. The fragments bypass the Vibe effect; Stop clears the history.
 - **Spread:** continuously increases stereo width and gradually blends in reverse tape playback on the left. It also adjusts Delay cross-feedback, Grab panning, and Phaser/Flanger stereo sweep offsets. Chorus already moves its channels in opposite directions. High settings can saturate the return.
-- **Looper:** Off (the default) listens while transport plays but does not play a loop.
-  Auto waits for audible input, records a Length-sized capture and loops it.
-  Hold catches the most recent available audio and holds it. Overdub starts like Auto, then records a separate layer up to 1.5 seconds long (or the original capture length, if shorter). Once recorded, it plays alongside the original and is gradually refreshed by new audible input. Very quiet input does not start or overwrite the layer; short gaps during the first capture are recorded. Switching to Hold keeps both layers.
-  Select Off and then Hold to catch another passage.
+- **Looper:** Off clears the loop. Auto clears the previous loop, waits for audible input and begins looping after 120 ms to one second depending on Length; it continues recording until the selected Length is ready. Hold keeps the current capture across Stop and effect reset. When empty, Hold records like Auto and then keeps that capture. Overdub records a separate layer up to 1.5 seconds long (or the original capture length, if shorter) and gradually refreshes it with new audible input. Switching to Hold keeps both layers.
 
-Stop clears the capture; restart begins listening afresh. The SDK exposes
-play state but not a double-Stop gesture to an effect, so Vibe cannot
-distinguish the first Stop from a double press. Captured audio is temporary
-and is not saved in projects.
+Stop clears Auto's loop and the Fragment history. Hold's loop remains in the send slot's scratch memory and resumes on playback; selecting Off or Auto clears it. Scratch memory can be overwritten by another effect and is not saved to projects or guaranteed across power cycles. The SDK exposes play state but not a double-Stop gesture, so Vibe cannot distinguish the first Stop from a double press.
 
 ## Memory and limits
 

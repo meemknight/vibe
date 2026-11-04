@@ -30,7 +30,7 @@ static bool failure(const char* text) { std::printf("FAIL: %s\n", text); return 
 static bool capture() {
     std::memset(mem, 0, sizeof(mem)); vibe::initialize(state); controls();
     u32 phase = 0;
-    for (u32 i = 0; i < 70; ++i) run(true, phase);
+    for (u32 i = 0; i < 100; ++i) run(true, phase);
     return state.captured != 0;
 }
 static int crossings(u32 speed) {

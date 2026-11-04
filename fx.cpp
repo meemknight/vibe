@@ -441,6 +441,17 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         for (u32 i = 0; i < opxy::block_frames; ++i) left[i] = right[i] = 0;
         return;
     }
+    const u32 mode = choice(p[3], 4);
+    // Hold metadata stays in the send scratch across effect resets. Audio is
+    // only restored when both markers and all recorded bounds are valid.
+    u32* const saved = reinterpret_cast<u32*>(b.words + wet_base - 22);
+    if (!s.controls_ready && mode == 2 && saved[0] == 0x56494245u && saved[1] == 0x484f4c44u &&
+        saved[2] < loop_frames && saved[3] >= 256 && saved[3] <= loop_frames &&
+        saved[4] <= layer_frames && saved[5] <= saved[4]) {
+        s.loop_start = saved[2]; s.loop_length = saved[3];
+        s.ring_valid = saved[3]; s.ring_write = ring_index(saved[2] + saved[3]);
+        s.layer_length = saved[4]; s.layer_valid = saved[5]; s.captured = 1;
+    }
     // Fragment bookkeeping occupies sixteen words at the end of scratch, outside
     // the rolling audio ring; initialize before reading any prior contents.
     u32* const fragment_state = reinterpret_cast<u32*>(b.words + wet_base - 16);
@@ -452,10 +463,10 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     u32 &next_start = fragment_state[10], &next_length = fragment_state[11];
     i32 &next_head = b.words[wet_base - 4], &next_step = b.words[wet_base - 3];
     u32 &current_pan = fragment_state[14];
+    u32 &auto_filling = fragment_state[15];
     if (!s.controls_ready) for (u32 i = 0; i < 16; ++i) fragment_state[i] = 0;
     const bool wet_ready = clear_wet(s, b);
     const u32 wet_mode = choice(p[4], 6);
-    const u32 mode = choice(p[3], 4);
     const bool smooth_clock = false;
     const u32 step = clock_step(32767, smooth_clock);
     const i32 targets[7] = {32767, static_cast<i32>(control(p[0])),
@@ -483,14 +494,22 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     }
     // Stop/restart is observable; the effect API cannot identify a double tap.
     if (!transport.playing && s.was_playing) {
-        s.captured = s.ring_valid = s.listening = 0;
+        if (mode != 2) s.captured = s.ring_valid = 0;
+        s.listening = 0;
         s.loop_gain = 0;
-        history_write = history_valid = fragment_remaining = fragment_wait = next_length = 0;
+        history_write = history_valid = fragment_remaining = fragment_wait = next_length = auto_filling = 0;
     }
     s.was_playing = transport.playing ? 1u : 0u;
-    if ((mode == 1 || mode == 3) && s.previous_mode != mode && !s.captured) {
+    if ((mode == 0 || mode == 1) && s.previous_mode != mode) {
+        saved[0] = saved[1] = 0;
+        s.captured = s.ring_valid = s.listening = 0; s.loop_gain = 0;
+    }
+    if (mode == 0) saved[0] = saved[1] = 0;
+    if ((mode == 1 || mode == 2 || mode == 3) && s.previous_mode != mode && !s.captured) {
         s.ring_valid = 0; s.listening = 0;
     }
+    if (mode != 1 && mode != 2) auto_filling = 0;
+    if (mode == 2 && s.previous_mode != mode && s.captured) auto_filling = 0;
     if (mode != 3 && s.previous_mode == 3) {
         s.overdub_envelope = s.overdub_mix = 0;
         s.overdub_active = 0;
@@ -504,6 +523,9 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     s.previous_mode = mode;
     const u32 length_knob = static_cast<u32>(s.smoothed[2]);
     const u32 length = 882 + ((length_knob * 43220u) >> 15);
+    // A longer requested loop gets a larger safe initial capture, while even
+    // the shortest loop waits for at least 120 ms of incoming audio.
+    const u32 initial_capture = length / 3 > 1764 ? length / 3 : 1764;
     const u32 wet_time = 882 + ((static_cast<u32>(s.smoothed[0]) * 31000u) >> 15);
     const u32 loop_modify = static_cast<u32>(s.smoothed[3]);
     const i32 tape_base = tape_rate[band(loop_modify, tape_bands, 7)];
@@ -560,9 +582,8 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
                 if (++history_write == history_frames) history_write = 0;
                 if (history_valid < history_frames) ++history_valid;
             }
-            if (mode == 2 && !s.captured && s.ring_valid >= 256) capture(s, length);
             i32 loop_l = 0, loop_r = 0;
-            looper(s, b, mode, spread, length, tape_step,
+            looper(s, b, transport.playing ? mode : 0, spread, length, tape_step,
                    s.tape_input_lp[1], tape_tick, loop_l, loop_r);
             const i32 feed_l = x_l, feed_r = x_r;
             i32 wet_l = 0, wet_r = 0;
@@ -653,16 +674,27 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
             const i32 record_mono = (x_l + x_r) / 2 + (wet_l + wet_r) / 4;
             s.tape_record_lp[0] += ((record_mono - s.tape_record_lp[0]) * 3) / 8;
             s.tape_record_lp[1] += ((s.tape_record_lp[0] - s.tape_record_lp[1]) * 3) / 8;
-            if (!s.captured && transport.playing) {
+            if (mode != 0 && (!s.captured || auto_filling) && transport.playing) {
                 const i32 level = s.tape_input_lp[1] < 0 ? -s.tape_input_lp[1] : s.tape_input_lp[1];
-                if ((mode != 1 && mode != 3) || level > 128) s.listening = 1;
+                if ((mode != 1 && mode != 2 && mode != 3) || level > 128) s.listening = 1;
                 if (s.listening && tape_tick) {
                     // Record the incoming signal and some of the wet sound,
                     // just as DigiTide listens to the pedal's output.
                     tape_put(b, s.ring_write, s.tape_record_lp[1]);
                     s.ring_write = ring_index(s.ring_write + 1);
                     if (s.ring_valid < loop_frames) ++s.ring_valid;
-                    if ((mode == 1 || mode == 3) && s.ring_valid >= length) capture(s, length);
+                    if ((mode == 1 || mode == 2) && !s.captured && s.ring_valid >= initial_capture) {
+                        // Start from a valid portion, then continue writing
+                        // until the chosen length is available.
+                        capture(s, length);
+                        auto_filling = s.ring_valid < length;
+                    } else if ((mode == 1 || mode == 2) && auto_filling && s.ring_valid >= length) {
+                        s.loop_length = s.ring_valid;
+                        s.layer_length = s.loop_length < layer_frames ? s.loop_length : layer_frames;
+                        auto_filling = 0;
+                    } else if (mode == 3 && !s.captured && s.ring_valid >= length) {
+                        capture(s, length);
+                    }
                 }
             }
             s.wet_hold[0] = wet_l; s.wet_hold[1] = wet_r;
@@ -682,6 +714,11 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         }
         left[i] = clamp16(s.output_lp[0]) * 65536;
         right[i] = clamp16(s.output_lp[1]) * 65536;
+    }
+    if (mode == 2 && s.captured) {
+        saved[2] = s.loop_start; saved[3] = s.loop_length;
+        saved[4] = s.layer_length; saved[5] = s.layer_valid;
+        saved[0] = 0x56494245u; saved[1] = 0x484f4c44u;
     }
 }
 } // namespace vibe
