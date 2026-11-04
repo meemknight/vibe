@@ -232,6 +232,7 @@ static bool fragments_history_and_stop() {
     u32* state = reinterpret_cast<u32*>(memory_a + base);
     if (!check(state[1] > 2048 && state[4] == 0, "history or zero-density behavior wrong")) return false;
     controls[2] = max_word;
+    controls[3] = option(1, 4);
     for (unsigned k = 0; k < 450; ++k) {
         block(state_a, memory_a, true, 268435456);
         if (!check(state[4] == 0, "fragment started before enough history")) return false;
@@ -248,6 +249,9 @@ static bool fragments_history_and_stop() {
         block(state_a, memory_a, true, 268435456);
         if (!check(state[4] != 0, "continuous history tape stopped between fragments")) return false;
     }
+    controls[3] = option(0, 4);
+    block(state_a, memory_a, true, 0);
+    if (!check(state[4] == 0, "Off retained fragment playback")) return false;
     block(state_a, memory_a, false, 0);
     return check(state[1] == 0 && state[4] == 0, "stop retained fragment history");
 }

@@ -137,7 +137,7 @@ void capture(State& s, u32 wanted) {
     s.loop_head = 0;
     s.overdub_position = 0;
     s.layer_length = layer_frames;
-    s.layer_valid = 0; s.layer_head = 0;
+    s.layer_valid = 0; s.layer_head = 0; s.layer_play_length = s.layer_fade = 0; s.layer_last = 0;
     s.overdub_envelope = s.overdub_mix = 0;
     s.overdub_active = 0;
     s.tape_length = s.tape_old_length = s.tape_fade = 0;
@@ -197,9 +197,19 @@ void looper(State& s, Buffer b, u32 mode, u32 spread, u32 length_control,
     u32 layer_play = s.layer_valid < len ? s.layer_valid : len;
     if (layer_play >= 256) {
         const i32 layer_span = static_cast<i32>(layer_play << 10);
+        if (s.layer_play_length && layer_play < s.layer_play_length) {
+            s.layer_fade_from = s.layer_last;
+            s.layer_fade = 256;
+        }
+        s.layer_play_length = layer_play;
         if (s.layer_head >= layer_span || s.layer_head < 0) s.layer_head = 0;
         s.layer_head = wrap(s.layer_head + tape_step, layer_span);
-        const i32 layer_r = layer_sample(b, s.layer_head, layer_play);
+        i32 layer_r = layer_sample(b, s.layer_head, layer_play);
+        if (s.layer_fade) {
+            layer_r = mix12(layer_r, s.layer_fade_from, static_cast<i32>(s.layer_fade * 16));
+            --s.layer_fade;
+        }
+        s.layer_last = layer_r;
         out_l = clamp16(out_l + layer_r / 2);
         out_r = clamp16(out_r + layer_r / 2);
     }
@@ -501,7 +511,10 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     if ((mode == 1 || mode == 2 || mode == 3) && s.previous_mode != mode && !s.captured) {
         s.ring_valid = 0; s.listening = 0;
     }
-    if (mode == 0) auto_filling = 0;
+    if (mode == 0) {
+        auto_filling = 0;
+        fragment_remaining = next_length = fragment_wait = 0;
+    }
     if (mode == 2 && s.previous_mode != mode && s.captured) auto_filling = 0;
     if (mode != 3 && s.previous_mode == 3) {
         s.overdub_envelope = s.overdub_mix = 0;
@@ -534,7 +547,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     // sample. The selected region is safely behind the live write head.
     // Wait for enough history to select at least 120 ms without approaching
     // the live write head, even at the shortest Length setting.
-    if (transport.playing && density && !fragment_remaining && history_valid >= 14112) {
+    if (mode && transport.playing && density && !fragment_remaining && history_valid >= 14112) {
         if (fragment_wait && density <= 16384) --fragment_wait;
         else {
             pick_fragment(length, history_valid, history_write, tape_step, random_state,
@@ -629,7 +642,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
                 loop_l = clamp16(loop_mid + loop_side + loop_extra);
                 loop_r = clamp16(loop_mid - loop_side - loop_extra);
             }
-            if (fragment_remaining) {
+            if (mode && fragment_remaining) {
                 const bool continuous = density > 16384;
                 if (!continuous) next_length = 0;
                 if (continuous && fragment_remaining <= 441 && !next_length)
