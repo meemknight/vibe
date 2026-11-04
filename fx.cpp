@@ -15,7 +15,7 @@ u32 ring_index(u32 index) { return index >= loop_frames ? index - loop_frames : 
 const u32 wet_mask = wet_frames - 1;
 const u32 wet_q8_mask = (wet_frames << 8) - 1;
 const u32 rev_mask = reverb_line - 1;
-const i32 tape_rate[] = {-1024, -512, -256, -128, 128, 256, 512, 1024};
+const i32 tape_rate[] = {-1365, -682, -341, -170, 170, 341, 682, 1365};
 // The band boundaries and octave speeds follow DigiTide.
 const u32 tape_bands[] = {5, 24, 43, 62, 85, 98, 120};
 const u32 clock_bands[] = {5, 16, 29, 41, 54, 70, 84, 96, 110};
@@ -515,11 +515,11 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     const u32 length = 882 + ((length_knob * 43220u) >> 15);
     // A longer requested loop gets a larger safe initial capture, while even
     // the shortest loop waits for at least 120 ms of incoming audio.
-    const u32 initial_capture = length / 3 > 1764 ? length / 3 : 1764;
+    const u32 initial_capture = (mode == 1 || mode == 2) && !s.captured && length > 5292 ? length / 3 : 1764;
     const u32 wet_time = 882 + ((static_cast<u32>(s.smoothed[0]) * 31000u) >> 15);
     const u32 loop_modify = static_cast<u32>(s.smoothed[3]);
     const i32 tape_base = tape_rate[band(loop_modify, tape_bands, 7)];
-    const i32 tape_step = (tape_base * 4) / 3;
+    const i32 tape_step = tape_base;
     const u32 wet_modify = static_cast<u32>(wet_moving);
     const i32 feedback = static_cast<i32>((wet_modify * 32112u) >> 15);
     const u32 k = (static_cast<u32>(s.smoothed[1]) * 128u) >> 15;
@@ -545,6 +545,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     }
     const u32 grab_period = 1102 + (wet_time >> 2);
     const u32 wet_spread_step = spread && wet_mode == 2 ? 2147483647u / grab_period : 0;
+    const i32 history_tape_gain = density > 16384 ? 32767 - static_cast<i32>((density - 16384) * 13 / 10) : 32767;
     const u32 clock = step;
     const i32 filter = clock >= 65534 ? 4096 : static_cast<i32>(clock >> 4);
     for (u32 i = 0; i < opxy::block_frames; ++i) {
@@ -649,8 +650,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
                     next_head = wrap(next_head + next_step, static_cast<i32>(next_length << 10));
                 }
                 if (continuous) {
-                    const i32 original_gain = 32767 - static_cast<i32>((density - 16384) * 13 / 10);
-                    loop_l = q15(loop_l, original_gain); loop_r = q15(loop_r, original_gain);
+                    loop_l = q15(loop_l, history_tape_gain); loop_r = q15(loop_r, history_tape_gain);
                 }
                 loop_l = clamp16(loop_l + fragment_l); loop_r = clamp16(loop_r + fragment_r);
                 fragment_head = wrap(fragment_head + fragment_step, static_cast<i32>(fragment_length << 10));
