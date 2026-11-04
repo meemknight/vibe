@@ -10,23 +10,22 @@ Press any encoder to switch between the two rows.
 
 | Encoder | Page 1 | Page 2 |
 | --- | --- | --- |
-| 1 | Vibe Prm | Loop Vol |
-| 2 | Options | Vibe |
-| 3 | Length | Looper |
-| 4 | Loop Spd | Motion |
+| 1 | Vibe Prm | Vibe |
+| 2 | Loop Spd | Loop Vol |
+| 3 | Length | Spread |
+| 4 | Looper | Fragment |
 
-- **Vibe:** Reverb (an eight-line feedback network), Delay or Grab
-  (a retriggered variable-speed fragment). Time is fixed at 100%. Vibe Prm sets diffusion, feedback or grab
-  pitch/direction respectively.
+- **Vibe:** Reverb (an eight-line feedback network), Delay, Grab (a retriggered variable-speed fragment), Phaser, Flanger or Chorus. Time is fixed at 100%. Vibe Prm sets diffusion, feedback or grab
+  pitch/direction, phaser rate, flanger rate or chorus depth respectively. Phaser, Flanger and Chorus return the modulated signal; the OP-XY retains the dry signal and mixes it with the return.
 - **Tape loop:** Loop Spd changes playback speed and direction in octave steps. Length sets capture duration and can shorten a captured loop.
 The wet channel always processes the incoming send; the loop plays alongside it.
 
 - **Loop Vol** adjusts only the loop, from silence to 1.5x; about 67% is unity. High levels can saturate the effect return.
-- **Motion** adds a slow, repeating drift to tape playback speed and the selected Vibe effect. Higher settings make the movement deeper and faster. At zero, the sound is steady. The wet return is fixed at unity; the OP-XY send controls the input level and stock retains the dry signal. The loop captures input plus some wet signal.
-- **Options:** Normal, Wide or X Wide (stronger stereo spread). Wide changes reverb width, makes Delay ping-pong and pans Grab; Tape plays the left loop backwards.
+- **Fragment:** records a rolling history of the incoming mono audio while transport plays, even at zero. Raising it adds randomly timed, short fragments from recent history to the loop return; higher settings make them louder and more frequent. Fragment size varies with Length (120–500 ms); playback waits for about one second of recorded history, and playback follows Loop Spd with a small random speed variation. Loop Vol controls their level. The fragments bypass the Vibe effect; Stop clears the history.
+- **Spread:** continuously increases stereo width and gradually blends in reverse tape playback on the left. It also adjusts Delay cross-feedback, Grab panning, and Phaser/Flanger stereo sweep offsets. Chorus already moves its channels in opposite directions. High settings can saturate the return.
 - **Looper:** Off (the default) listens while transport plays but does not play a loop.
   Auto waits for audible input, records a Length-sized capture and loops it.
-  Hold catches the most recent available audio and holds it. Overdub starts like Auto, then gradually replaces the captured audio with new input. It ignores very quiet input and smoothly fades recording in and out; short gaps can still be recorded.
+  Hold catches the most recent available audio and holds it. Overdub starts like Auto, then records a separate layer up to 1.5 seconds long (or the original capture length, if shorter). Once recorded, it plays alongside the original and is gradually refreshed by new audible input. Very quiet input does not start or overwrite the layer; short gaps during the first capture are recorded. Switching to Hold keeps both layers.
   Select Off and then Hold to catch another passage.
 
 Stop clears the capture; restart begins listening afresh. The SDK exposes
@@ -37,10 +36,10 @@ and is not saved in projects.
 ## Memory and limits
 
 Vibe requests 516,096 bytes of per-send scratch memory, 8 KiB below the SDK's
-per-effect limit. The loop ring holds 155,648 mono 16-bit frames at 22.05 kHz,
-with a selectable capture from about 60 ms to 6.97 seconds. A low-pass filter
+per-effect limit. The active loop ring holds 44,100 mono 16-bit frames at 14.7 kHz,
+with a selectable capture from about 60 ms to 3 seconds. The overdub layer uses another 22,050 frames (44,100 bytes). The remaining tape storage holds about 6.09 seconds of rolling history for Fragment and a small amount of bookkeeping. A low-pass filter
 precedes recording, and stereo playback options are applied to the mono loop. The shared
-Delay/Grab history holds 32,768 stereo frames. The reverb's
+Delay/Grab/Flanger/Chorus history holds 32,768 stereo frames. The reverb's
 eight lines and input allpasses occupy the rest. The wet memory is cleared
 in bounded steps after reset, so its output begins after roughly 0.15 seconds.
 
@@ -79,3 +78,9 @@ designs and rate bands inform Vibe's adapted DSP. Vibe is GPL-2.0-or-later;
 see LICENSE.
 
 Existing saved settings from earlier development builds may need to be reselected.
+
+Saved Options settings from earlier versions may need adjustment for the continuous Spread control.
+
+Saved Motion settings from earlier versions may need adjustment for Fragment.
+
+Parameter positions changed; saved settings from older development builds may need to be reselected.

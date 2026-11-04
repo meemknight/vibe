@@ -8,7 +8,7 @@ static opxy::i32 opt(unsigned i,unsigned n) {
 static unsigned long long measure(unsigned setting) {
     vibe::initialize(state);
     for (unsigned i=0;i<12;++i) p[i]=0;
-    p[7]=0; p[1]=opt(setting,3); p[5]=opt(1,3); p[6]=opt(0,4);
+    p[7]=0; p[6]=opt(setting,3); p[4]=opt(1,6); p[3]=opt(0,4);
     unsigned long long sides=0;
     for (unsigned block=0;block<800;++block) {
         for (unsigned i=0;i<64;++i) {

@@ -16,31 +16,6 @@
       "display": "percent"
     },
     {
-      "id": "options",
-      "label": "Options",
-      "default": 0,
-      "mapping": {
-        "kind": "enum",
-        "labels": [
-          "Normal",
-          "Wide",
-          "X Wide"
-        ]
-      },
-      "display": "enum"
-    },
-    {
-      "id": "length",
-      "label": "Length",
-      "default": 0.4,
-      "mapping": {
-        "kind": "linear",
-        "minimum": 0,
-        "maximum": 1
-      },
-      "display": "percent"
-    },
-    {
       "id": "loopmod",
       "label": "Loop Spd",
       "default": 0.57,
@@ -52,29 +27,15 @@
       "display": "percent"
     },
     {
-      "id": "balance",
-      "label": "Loop Vol",
-      "default": 0.6666667,
+      "id": "length",
+      "label": "Length",
+      "default": 0.4,
       "mapping": {
         "kind": "linear",
         "minimum": 0,
         "maximum": 1
       },
       "display": "percent"
-    },
-    {
-      "id": "wetmode",
-      "label": "Vibe",
-      "default": 0,
-      "mapping": {
-        "kind": "enum",
-        "labels": [
-          "Reverb",
-          "Delay",
-          "Grab"
-        ]
-      },
-      "display": "enum"
     },
     {
       "id": "capture",
@@ -92,8 +53,47 @@
       "display": "enum"
     },
     {
-      "id": "motion",
-      "label": "Motion",
+      "id": "wetmode",
+      "label": "Vibe",
+      "default": 0,
+      "mapping": {
+        "kind": "enum",
+        "labels": [
+          "Reverb",
+          "Delay",
+          "Grab",
+          "Phaser",
+          "Flanger",
+          "Chorus"
+        ]
+      },
+      "display": "enum"
+    },
+    {
+      "id": "balance",
+      "label": "Loop Vol",
+      "default": 0.6666667,
+      "mapping": {
+        "kind": "linear",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "display": "percent"
+    },
+    {
+      "id": "spread",
+      "label": "Spread",
+      "default": 0,
+      "mapping": {
+        "kind": "linear",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "display": "percent"
+    },
+    {
+      "id": "fragments",
+      "label": "Fragment",
       "default": 0,
       "mapping": {
         "kind": "linear",
