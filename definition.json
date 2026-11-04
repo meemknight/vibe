@@ -1,0 +1,114 @@
+{
+  "schema": 1,
+  "id": "vibe",
+  "name": "Vibe",
+  "press": "page",
+  "parameters": [
+    {
+      "id": "wetmod",
+      "label": "Wet Mod",
+      "default": 0.35,
+      "mapping": {
+        "kind": "linear",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "display": "percent"
+    },
+    {
+      "id": "options",
+      "label": "Options",
+      "default": 0,
+      "mapping": {
+        "kind": "enum",
+        "labels": [
+          "Normal",
+          "Wide",
+          "X Wide"
+        ]
+      },
+      "display": "enum"
+    },
+    {
+      "id": "length",
+      "label": "Length",
+      "default": 0.4,
+      "mapping": {
+        "kind": "linear",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "display": "percent"
+    },
+    {
+      "id": "loopmod",
+      "label": "Loop Spd",
+      "default": 0.57,
+      "mapping": {
+        "kind": "linear",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "display": "percent"
+    },
+    {
+      "id": "balance",
+      "label": "Loop Vol",
+      "default": 0.5,
+      "mapping": {
+        "kind": "linear",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "display": "percent"
+    },
+    {
+      "id": "wetmode",
+      "label": "Wet Mode",
+      "default": 0,
+      "mapping": {
+        "kind": "enum",
+        "labels": [
+          "Reverb",
+          "Delay",
+          "Grab"
+        ]
+      },
+      "display": "enum"
+    },
+    {
+      "id": "loopmode",
+      "label": "LoopMode",
+      "default": 0,
+      "mapping": {
+        "kind": "enum",
+        "labels": [
+          "Tape",
+          "Env",
+          "Stretch"
+        ]
+      },
+      "display": "enum"
+    },
+    {
+      "id": "capture",
+      "label": "Looper",
+      "default": 0,
+      "mapping": {
+        "kind": "enum",
+        "labels": [
+          "Off",
+          "Auto",
+          "Hold",
+          "Overdub"
+        ]
+      },
+      "display": "enum"
+    }
+  ],
+  "presets": {},
+  "resources": {
+    "bufferBytes": 524288,
+    "transport": 1
+  }
+}

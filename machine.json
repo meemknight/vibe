@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "sdk": "1.9",
+  "kind": "effect",
+  "description": "Vibe stereo ambience and micro-looper"
+}
