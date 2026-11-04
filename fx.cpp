@@ -18,8 +18,6 @@ const u32 rev_mask = reverb_line - 1;
 const i32 tape_rate[] = {-1365, -682, -341, -170, 170, 341, 682, 1365};
 // The band boundaries and octave speeds follow DigiTide.
 const u32 tape_bands[] = {5, 24, 43, 62, 85, 98, 120};
-const u32 clock_bands[] = {5, 16, 29, 41, 54, 70, 84, 96, 110};
-const u32 clock_rates[] = {2000,3000,4000,6000,8000,12000,16000,24000,32000,44100};
 const u32 grab_ratios[] = {256,271,287,304,323,342,362,384,406,431,456,483,512};
 const u32 rev_lengths[] = {691,827,941,1061,1181,1319,1481,1619};
 const u32 ap_lengths[] = {142,379,149,367};
@@ -85,21 +83,6 @@ bool clear_wet(State& s, Buffer b) {
     for (u32 i = 0; i < count; ++i) b.words[wet_base + s.clear_pos + i] = 0;
     s.clear_pos += count;
     return s.clear_pos == total;
-}
-
-u32 clock_step(u32 knob, bool smooth) {
-    u32 hz;
-    if (knob == 32767) return 65536;
-    if (!smooth) {
-        hz = clock_rates[band(knob, clock_bands, 9)];
-    } else {
-        const u32 scaled = knob * 9u;
-        const u32 index = scaled >> 15;
-        const u32 fraction = scaled & 32767u;
-        hz = clock_rates[index] +
-             (((clock_rates[index + 1] - clock_rates[index]) * fraction) >> 15);
-    }
-    return hz >= 44100 ? 65536u : (hz * 65536u) / 44100u;
 }
 
 // Linear interpolation on a captured region. Unlike an arbitrary ring read,
@@ -253,6 +236,14 @@ void wet_tap(Buffer b, u32 position, i32& l, i32& r) {
     r = ar + (((unpack(second, true) - ar) * static_cast<i32>(frac)) >> 8);
 }
 
+// Delay taps always address whole samples; interpolation would read a
+// second word only to multiply it by zero.
+void wet_tap_whole(Buffer b, u32 position, i32& l, i32& r) {
+    const u32 word = static_cast<u32>(b.words[wet_base + (position & wet_mask)]);
+    l = unpack(word, false);
+    r = unpack(word, true);
+}
+
 i32 allpass(State& s, Buffer b, u32 line, i32 x, i32 gain) {
     const u32 at = allpass_base + line * allpass_line + s.allpass_write[line];
     const i32 previous = b.words[at];
@@ -297,10 +288,10 @@ void delay(State& s, Buffer b, u32 target, i32 feedback, u32 spread,
         s.delay_current = target;
         s.delay_fade = 1024;
     } else if (!s.delay_fade) s.delay_current = target;
-    wet_tap(b, ((s.wet_write - s.delay_current) & wet_mask) << 8, l, r);
+    wet_tap_whole(b, s.wet_write - s.delay_current, l, r);
     if (s.delay_fade) {
         i32 old_l, old_r;
-        wet_tap(b, ((s.wet_write - s.delay_old) & wet_mask) << 8, old_l, old_r);
+        wet_tap_whole(b, s.wet_write - s.delay_old, old_l, old_r);
         l = mix12(l, old_l, static_cast<i32>(s.delay_fade * 4));
         r = mix12(r, old_r, static_cast<i32>(s.delay_fade * 4));
         --s.delay_fade;
@@ -466,8 +457,6 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     if (!s.controls_ready) for (u32 i = 0; i < 16; ++i) fragment_state[i] = 0;
     const bool wet_ready = clear_wet(s, b);
     const u32 wet_mode = choice(p[4], 6);
-    const bool smooth_clock = false;
-    const u32 step = clock_step(32767, smooth_clock);
     const i32 targets[7] = {32767, static_cast<i32>(control(p[0])),
                             static_cast<i32>(control(p[7])), static_cast<i32>(control(p[1])),
                             static_cast<i32>(control(p[5])), static_cast<i32>(control(p[2])),
@@ -562,165 +551,144 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     const u32 grab_period = 1102 + (wet_time >> 2);
     const u32 wet_spread_step = spread && wet_mode == 2 ? 2147483647u / grab_period : 0;
     const i32 history_tape_gain = density > 16384 ? 32767 - static_cast<i32>((density - 16384) * 13 / 10) : 32767;
-    const u32 clock = step;
-    const i32 filter = clock >= 65534 ? 4096 : static_cast<i32>(clock >> 4);
+    const u32 active_looper = transport.playing ? mode : 0;
     for (u32 i = 0; i < opxy::block_frames; ++i) {
         if (s.smoothed[4] != targets[4]) s.smoothed[4] = smooth_control(s.smoothed[4], targets[4]);
-        const i32 in_l = left[i] >> 17, in_r = right[i] >> 17;
-        // One-pole anti-alias filtering before clock reduction, as in DigiTide.
-        if (clock >= 65534) {
-            s.input_lp[0] = in_l;
-            s.input_lp[1] = in_r;
-        } else {
-            s.input_lp[0] += ((in_l - s.input_lp[0]) * filter) >> 12;
-            s.input_lp[1] += ((in_r - s.input_lp[1]) * filter) >> 12;
+        // Clock is fixed at 44.1 kHz: every input sample is processed once.
+        const i32 x_l = left[i] >> 17, x_r = right[i] >> 17;
+        const i32 mono = (x_l + x_r) / 2;
+        s.tape_input_lp[0] += ((mono - s.tape_input_lp[0]) * 3) / 8;
+        s.tape_input_lp[1] += ((s.tape_input_lp[0] - s.tape_input_lp[1]) * 3) / 8;
+        if (++s.tape_phase == 3) s.tape_phase = 0;
+        const bool tape_tick = s.tape_phase == 0;
+        if (tape_tick && transport.playing) {
+            tape_put(b, history_base + history_write, s.tape_input_lp[1]);
+            if (++history_write == history_frames) history_write = 0;
+            if (history_valid < history_frames) ++history_valid;
         }
-        s.clock_phase += clock;
-        if (s.clock_phase >= 65536) {
-            s.clock_phase -= 65536;
-            const i32 x_l = s.input_lp[0], x_r = s.input_lp[1];
-            const i32 mono = (x_l + x_r) / 2;
-            s.tape_input_lp[0] += ((mono - s.tape_input_lp[0]) * 3) / 8;
-            s.tape_input_lp[1] += ((s.tape_input_lp[0] - s.tape_input_lp[1]) * 3) / 8;
-            if (++s.tape_phase == 3) s.tape_phase = 0;
-            const bool tape_tick = s.tape_phase == 0;
-            if (tape_tick && transport.playing) {
-                tape_put(b, history_base + history_write, s.tape_input_lp[1]);
-                if (++history_write == history_frames) history_write = 0;
-                if (history_valid < history_frames) ++history_valid;
-            }
-            i32 loop_l = 0, loop_r = 0;
-            looper(s, b, transport.playing ? mode : 0, spread, length, tape_step,
+        i32 loop_l = 0, loop_r = 0;
+        if (s.captured || s.loop_gain)
+            looper(s, b, active_looper, spread, length, tape_step,
                    s.tape_input_lp[1], tape_tick, loop_l, loop_r);
-            if (spread) {
-                loop_l = q15(loop_l, 32767 - loop_pan);
-                loop_r = q15(loop_r, 32767 + loop_pan);
+        if (spread) {
+            loop_l = q15(loop_l, 32767 - loop_pan);
+            loop_r = q15(loop_r, 32767 + loop_pan);
+        }
+        const i32 feed_l = x_l, feed_r = x_r;
+        i32 wet_l = 0, wet_r = 0;
+        if (wet_ready) {
+            if (wet_mode == 0)
+                reverb(s, b, feed_l, feed_r, wet_l, wet_r);
+            else if (wet_mode == 1)
+                delay(s, b, wet_time, feedback, spread, feed_l, feed_r, wet_l, wet_r);
+            else if (wet_mode == 2)
+                grab(s, b, grab_period, grab_rate, feed_l, feed_r, wet_l, wet_r);
+            else
+                modulation(s, b, wet_mode, static_cast<u32>(wet_moving), spread, feed_l, feed_r, wet_l, wet_r);
+        }
+        if (s.transition) {
+            wet_l = mix12(wet_l, s.previous_wet[0], static_cast<i32>(s.transition * 16));
+            wet_r = mix12(wet_r, s.previous_wet[1], static_cast<i32>(s.transition * 16));
+            --s.transition;
+        } else {
+            s.previous_wet[0] = wet_l;
+            s.previous_wet[1] = wet_r;
+        }
+        if (spread && wet_mode == 0) {
+            const i32 mid = (wet_l + wet_r) / 2, side = (wet_l - wet_r) / 2;
+            const i32 extra = q15(side, static_cast<i32>(spread)) / 2;
+            wet_l = clamp16(mid + side + extra);
+            wet_r = clamp16(mid - side - extra);
+        }
+        if (spread && wet_mode == 2) {
+            s.wet_spread_phase += wet_spread_step;
+            const u32 wave = s.wet_spread_phase >> 16;
+            const i32 pan = static_cast<i32>(wave < 32768 ? wave : 65535 - wave);
+            const i32 pan_amount = q15(pan / 2, static_cast<i32>(spread));
+            const i32 other_amount = q15(16383 - pan / 2, static_cast<i32>(spread));
+            wet_l = q15(wet_l, 32767 - pan_amount);
+            wet_r = q15(wet_r, 32767 - other_amount);
+        }
+        if (spread) {
+            // Gradually emphasize stereo sides; high settings can saturate.
+            const i32 wet_mid = (wet_l + wet_r) / 2, wet_side = (wet_l - wet_r) / 2;
+            const i32 loop_mid = (loop_l + loop_r) / 2, loop_side = (loop_l - loop_r) / 2;
+            const i32 wet_extra = q15(wet_side, static_cast<i32>(spread)) / 2;
+            const i32 loop_extra = q15(loop_side, static_cast<i32>(spread)) / 2;
+            wet_l = clamp16(wet_mid + wet_side + wet_extra);
+            wet_r = clamp16(wet_mid - wet_side - wet_extra);
+            loop_l = clamp16(loop_mid + loop_side + loop_extra);
+            loop_r = clamp16(loop_mid - loop_side - loop_extra);
+        }
+        if (mode && fragment_remaining) {
+            const bool continuous = density > 16384;
+            if (!continuous) next_length = 0;
+            if (continuous && fragment_remaining <= 441 && !next_length)
+                pick_fragment(length, history_valid, history_write, tape_step, random_state,
+                              next_start, next_length, next_head, next_step);
+            const i32 grain = fragment_sample(b, fragment_start, fragment_length, fragment_head);
+            const u32 elapsed = fragment_total - fragment_remaining;
+            u32 fade = elapsed < 441 ? elapsed : 441;
+            if (!continuous && fragment_remaining < fade) fade = fragment_remaining;
+            const i32 level = q15(static_cast<i32>(fade * 63u), static_cast<i32>(density));
+            i32 added = q15(grain, level);
+            i32 fragment_l = q15(added, 16384 + static_cast<i32>(current_pan));
+            i32 fragment_r = q15(added, 32767 - static_cast<i32>(current_pan));
+            if (continuous && next_length) {
+                const i32 next_grain = fragment_sample(b, next_start, next_length, next_head);
+                const i32 next_added = q15(next_grain, level);
+                const i32 pan = static_cast<i32>((random_state >> 8) & 16383u);
+                const i32 fade_next = static_cast<i32>(((441u - fragment_remaining) * 4096u) / 441u);
+                fragment_l = mix12(fragment_l, q15(next_added, 16384 + pan), fade_next);
+                fragment_r = mix12(fragment_r, q15(next_added, 32767 - pan), fade_next);
+                next_head = wrap(next_head + next_step, static_cast<i32>(next_length << 10));
             }
-            const i32 feed_l = x_l, feed_r = x_r;
-            i32 wet_l = 0, wet_r = 0;
-            if (wet_ready) {
-                if (wet_mode == 0)
-                    reverb(s, b, feed_l, feed_r, wet_l, wet_r);
-                else if (wet_mode == 1)
-                    delay(s, b, wet_time, feedback, spread, feed_l, feed_r, wet_l, wet_r);
-                else if (wet_mode == 2)
-                    grab(s, b, grab_period, grab_rate, feed_l, feed_r, wet_l, wet_r);
-                else
-                    modulation(s, b, wet_mode, static_cast<u32>(wet_moving), spread, feed_l, feed_r, wet_l, wet_r);
+            if (continuous) {
+                loop_l = q15(loop_l, history_tape_gain); loop_r = q15(loop_r, history_tape_gain);
             }
-            if (s.transition) {
-                wet_l = mix12(wet_l, s.previous_wet[0], static_cast<i32>(s.transition * 16));
-                wet_r = mix12(wet_r, s.previous_wet[1], static_cast<i32>(s.transition * 16));
-                --s.transition;
-            } else {
-                s.previous_wet[0] = wet_l;
-                s.previous_wet[1] = wet_r;
+            loop_l = clamp16(loop_l + fragment_l); loop_r = clamp16(loop_r + fragment_r);
+            fragment_head = wrap(fragment_head + fragment_step, static_cast<i32>(fragment_length << 10));
+            --fragment_remaining;
+            if (!fragment_remaining && continuous && next_length) {
+                fragment_start = next_start; fragment_length = next_length;
+                fragment_head = next_head; fragment_step = next_step;
+                fragment_total = fragment_length * 3;
+                fragment_remaining = fragment_total - 441;
+                current_pan = (random_state >> 8) & 16383u;
+                next_length = 0;
             }
-            if (spread && wet_mode == 0) {
-                const i32 mid = (wet_l + wet_r) / 2, side = (wet_l - wet_r) / 2;
-                const i32 extra = q15(side, static_cast<i32>(spread)) / 2;
-                wet_l = clamp16(mid + side + extra);
-                wet_r = clamp16(mid - side - extra);
-            }
-            if (spread && wet_mode == 2) {
-                s.wet_spread_phase += wet_spread_step;
-                const u32 wave = s.wet_spread_phase >> 16;
-                const i32 pan = static_cast<i32>(wave < 32768 ? wave : 65535 - wave);
-                const i32 pan_amount = q15(pan / 2, static_cast<i32>(spread));
-                const i32 other_amount = q15(16383 - pan / 2, static_cast<i32>(spread));
-                wet_l = q15(wet_l, 32767 - pan_amount);
-                wet_r = q15(wet_r, 32767 - other_amount);
-            }
-            if (spread) {
-                // Gradually emphasize stereo sides; high settings can saturate.
-                const i32 wet_mid = (wet_l + wet_r) / 2, wet_side = (wet_l - wet_r) / 2;
-                const i32 loop_mid = (loop_l + loop_r) / 2, loop_side = (loop_l - loop_r) / 2;
-                const i32 wet_extra = q15(wet_side, static_cast<i32>(spread)) / 2;
-                const i32 loop_extra = q15(loop_side, static_cast<i32>(spread)) / 2;
-                wet_l = clamp16(wet_mid + wet_side + wet_extra);
-                wet_r = clamp16(wet_mid - wet_side - wet_extra);
-                loop_l = clamp16(loop_mid + loop_side + loop_extra);
-                loop_r = clamp16(loop_mid - loop_side - loop_extra);
-            }
-            if (mode && fragment_remaining) {
-                const bool continuous = density > 16384;
-                if (!continuous) next_length = 0;
-                if (continuous && fragment_remaining <= 441 && !next_length)
-                    pick_fragment(length, history_valid, history_write, tape_step, random_state,
-                                  next_start, next_length, next_head, next_step);
-                const i32 grain = fragment_sample(b, fragment_start, fragment_length, fragment_head);
-                const u32 elapsed = fragment_total - fragment_remaining;
-                u32 fade = elapsed < 441 ? elapsed : 441;
-                if (!continuous && fragment_remaining < fade) fade = fragment_remaining;
-                const i32 level = q15(static_cast<i32>(fade * 63u), static_cast<i32>(density));
-                i32 added = q15(grain, level);
-                i32 fragment_l = q15(added, 16384 + static_cast<i32>(current_pan));
-                i32 fragment_r = q15(added, 32767 - static_cast<i32>(current_pan));
-                if (continuous && next_length) {
-                    const i32 next_grain = fragment_sample(b, next_start, next_length, next_head);
-                    const i32 next_added = q15(next_grain, level);
-                    const i32 pan = static_cast<i32>((random_state >> 8) & 16383u);
-                    const i32 fade_next = static_cast<i32>(((441u - fragment_remaining) * 4096u) / 441u);
-                    fragment_l = mix12(fragment_l, q15(next_added, 16384 + pan), fade_next);
-                    fragment_r = mix12(fragment_r, q15(next_added, 32767 - pan), fade_next);
-                    next_head = wrap(next_head + next_step, static_cast<i32>(next_length << 10));
+        }
+        if (!mode && s.captured && !s.loop_gain) s.captured = 0;
+        const i32 record_mono = (x_l + x_r) / 2 + (wet_l + wet_r) / 4;
+        s.tape_record_lp[0] += ((record_mono - s.tape_record_lp[0]) * 3) / 8;
+        s.tape_record_lp[1] += ((s.tape_record_lp[0] - s.tape_record_lp[1]) * 3) / 8;
+        if (mode != 0 && (!s.captured || auto_filling) && transport.playing) {
+            const i32 level = s.tape_input_lp[1] < 0 ? -s.tape_input_lp[1] : s.tape_input_lp[1];
+            if ((mode != 1 && mode != 2 && mode != 3) || level > 128) s.listening = 1;
+            if (s.listening && tape_tick) {
+                // Record the incoming signal and some of the wet sound,
+                // just as DigiTide listens to the pedal's output.
+                tape_put(b, s.ring_write, s.tape_record_lp[1]);
+                s.ring_write = ring_index(s.ring_write + 1);
+                if (s.ring_valid < loop_frames) ++s.ring_valid;
+                if (!s.captured && s.ring_valid >= initial_capture) {
+                    // Start from a valid portion, then continue writing
+                    // until the chosen length is available.
+                    capture(s, s.ring_valid);
+                    auto_filling = s.ring_valid < loop_frames;
+                } else if (auto_filling) {
+                    s.loop_length = s.ring_valid;
+                    if (s.ring_valid >= loop_frames) auto_filling = 0;
                 }
-                if (continuous) {
-                    loop_l = q15(loop_l, history_tape_gain); loop_r = q15(loop_r, history_tape_gain);
-                }
-                loop_l = clamp16(loop_l + fragment_l); loop_r = clamp16(loop_r + fragment_r);
-                fragment_head = wrap(fragment_head + fragment_step, static_cast<i32>(fragment_length << 10));
-                --fragment_remaining;
-                if (!fragment_remaining && continuous && next_length) {
-                    fragment_start = next_start; fragment_length = next_length;
-                    fragment_head = next_head; fragment_step = next_step;
-                    fragment_total = fragment_length * 3;
-                    fragment_remaining = fragment_total - 441;
-                    current_pan = (random_state >> 8) & 16383u;
-                    next_length = 0;
-                }
             }
-            if (!mode && s.captured && !s.loop_gain) s.captured = 0;
-            const i32 record_mono = (x_l + x_r) / 2 + (wet_l + wet_r) / 4;
-            s.tape_record_lp[0] += ((record_mono - s.tape_record_lp[0]) * 3) / 8;
-            s.tape_record_lp[1] += ((s.tape_record_lp[0] - s.tape_record_lp[1]) * 3) / 8;
-            if (mode != 0 && (!s.captured || auto_filling) && transport.playing) {
-                const i32 level = s.tape_input_lp[1] < 0 ? -s.tape_input_lp[1] : s.tape_input_lp[1];
-                if ((mode != 1 && mode != 2 && mode != 3) || level > 128) s.listening = 1;
-                if (s.listening && tape_tick) {
-                    // Record the incoming signal and some of the wet sound,
-                    // just as DigiTide listens to the pedal's output.
-                    tape_put(b, s.ring_write, s.tape_record_lp[1]);
-                    s.ring_write = ring_index(s.ring_write + 1);
-                    if (s.ring_valid < loop_frames) ++s.ring_valid;
-                    if (!s.captured && s.ring_valid >= initial_capture) {
-                        // Start from a valid portion, then continue writing
-                        // until the chosen length is available.
-                        capture(s, s.ring_valid);
-                        auto_filling = s.ring_valid < loop_frames;
-                    } else if (auto_filling) {
-                        s.loop_length = s.ring_valid;
-                        if (s.ring_valid >= loop_frames) auto_filling = 0;
-                    }
-                }
-            }
-            s.wet_hold[0] = wet_l; s.wet_hold[1] = wet_r;
-            s.loop_hold[0] = loop_l; s.loop_hold[1] = loop_r;
         }
         const i32 loop_gain = s.smoothed[4];
-        const i32 wet_gain = 32767;
-        const i32 lo_l = q15(s.loop_hold[0], loop_gain), lo_r = q15(s.loop_hold[1], loop_gain);
+        const i32 lo_l = q15(loop_l, loop_gain), lo_r = q15(loop_r, loop_gain);
         // Linear 0 to 1.5x loop gain; wet gain is independent.
-        const i32 out_l = clamp16(q15(s.wet_hold[0], wet_gain) + lo_l + lo_l / 2);
-        const i32 out_r = clamp16(q15(s.wet_hold[1], wet_gain) + lo_r + lo_r / 2);
-        if (clock < 65534) {
-            s.output_lp[0] += ((out_l - s.output_lp[0]) * filter) >> 12;
-            s.output_lp[1] += ((out_r - s.output_lp[1]) * filter) >> 12;
-        } else {
-            s.output_lp[0] = out_l; s.output_lp[1] = out_r;
-        }
-        left[i] = clamp16(s.output_lp[0]) * 65536;
-        right[i] = clamp16(s.output_lp[1]) * 65536;
+        const i32 out_l = clamp16(q15(wet_l, 32767) + lo_l + lo_l / 2);
+        const i32 out_r = clamp16(q15(wet_r, 32767) + lo_r + lo_r / 2);
+        left[i] = out_l * 65536;
+        right[i] = out_r * 65536;
     }
     if (mode == 2 && s.captured) {
         saved[2] = s.loop_start; saved[3] = s.loop_length;
