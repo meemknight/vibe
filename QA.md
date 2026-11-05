@@ -123,7 +123,7 @@ Once the machine's catalog entry is merged and released (the beta site from `sta
 ## Known limits
 
 - The loop is at most about 3 seconds.
-- Any transition to stopped clears the loop; double Stop cannot be detected.
+- Capture is audio-driven and Stop does not clear the loop; choose Looper Off to clear it.
 - A new effect takes about 0.15 seconds to initialize its wet scratch.
 - MIDI note control, separate freeze, ramping and most hidden pedal settings
   are not provided. Hardware CPU and sound have not yet been measured.

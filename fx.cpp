@@ -401,14 +401,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         s.reverb_feedback = 18000 + ((s.smoothed[0] * 13500) >> 15);
         s.reverb_diffusion = (wet_moving * 5) >> 3;
     }
-    // Stop/restart is observable; the effect API cannot identify a double tap.
-    if (!transport.playing && s.was_playing) {
-        if (mode != 2) s.captured = s.ring_valid = 0;
-        s.listening = 0;
-        s.loop_gain = 0;
-        history_write = history_valid = fragment_remaining = fragment_wait = next_length = auto_filling = 0;
-    }
-    s.was_playing = transport.playing ? 1u : 0u;
+    (void)transport; // Capture is audio-driven; the play flag is unavailable on device.
     if ((mode == 0 || mode == 1) && s.previous_mode != mode) {
         saved[0] = saved[1] = 0;
         s.captured = s.ring_valid = s.listening = 0; s.loop_gain = 0;
@@ -453,7 +446,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     // sample. The selected region is safely behind the live write head.
     // Wait for enough history to select at least 120 ms without approaching
     // the live write head, even at the shortest Length setting.
-    if (mode && transport.playing && density && !fragment_remaining && history_valid >= 10584) {
+    if (mode && density && !fragment_remaining && history_valid >= 10584) {
         if (fragment_wait && density <= 16384) --fragment_wait;
         else {
             pick_fragment(length, history_valid, history_write, tape_step, random_state,
@@ -467,7 +460,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     }
     const u32 grab_period = 276 + (wet_time >> 2);
     const i32 history_tape_gain = density > 16384 ? 32767 - static_cast<i32>((density - 16384) * 13 / 10) : 32767;
-    const u32 active_looper = transport.playing ? mode : 0;
+    const u32 active_looper = mode;
     for (u32 i = 0; i < opxy::block_frames / 4; ++i) {
         if (s.smoothed[4] != targets[4]) s.smoothed[4] = smooth_control(s.smoothed[4], targets[4]);
         // Four-tap binomial anti-alias filter before quarter-rate processing.
@@ -477,7 +470,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         s.tape_input_lp[0] += ((mono - s.tape_input_lp[0]) * 3) / 8;
         s.tape_input_lp[1] += ((s.tape_input_lp[0] - s.tape_input_lp[1]) * 3) / 8;
         const bool tape_tick = true;
-        if (tape_tick && transport.playing) {
+        if (tape_tick) {
             tape_put(b, history_base + history_write, s.tape_input_lp[1]);
             if (++history_write == history_frames) history_write = 0;
             if (history_valid < history_frames) ++history_valid;
@@ -560,9 +553,8 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         const i32 record_mono = (x_l + x_r) / 2 + (wet_l >> 17) / 2;
         s.tape_record_lp[0] += ((record_mono - s.tape_record_lp[0]) * 3) / 8;
         s.tape_record_lp[1] += ((s.tape_record_lp[0] - s.tape_record_lp[1]) * 3) / 8;
-        if (mode != 0 && (!s.captured || auto_filling) && transport.playing) {
-            const i32 level = s.tape_input_lp[1] < 0 ? -s.tape_input_lp[1] : s.tape_input_lp[1];
-            if ((mode != 1 && mode != 2 && mode != 3) || level > 128) s.listening = 1;
+        if (mode != 0 && (!s.captured || auto_filling)) {
+            if (feed_l > 65536 || feed_l < -65536) s.listening = 1;
             if (s.listening && tape_tick) {
                 // Record the incoming signal and some of the wet sound,
                 // just as DigiTide listens to the pedal's output.

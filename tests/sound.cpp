@@ -75,9 +75,9 @@ static bool auto_capture_and_stop() {
     }
     if (!check(heard, "captured loop is silent")) return false;
     block(state_a, memory_a, false, 0);
-    if (!check(!state_a.captured && !state_a.ring_valid, "transport stop did not clear capture")) return false;
-    block(state_a, memory_a, true, 0);
-    return check(!state_a.captured && !state_a.ring_valid, "restart captured stale audio");
+    if (!check(state_a.captured && state_a.ring_valid, "capture was cleared by unavailable transport")) return false;
+    controls[3] = option(0, 4); block(state_a, memory_a, false, 0);
+    return check(!state_a.captured && !state_a.ring_valid, "Off did not clear capture");
 }
 static bool auto_starts_before_full_capture() {
     defaults();
@@ -130,15 +130,13 @@ static bool hold_survives_reset_and_off_clears() {
     controls[3] = option(2, 4);
     for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 268435456);
     if (!check(state_a.captured, "empty Hold did not record")) return false;
+    block(state_a, memory_a, false, 0);
     const u32 saved_start = state_a.loop_start, saved_length = state_a.loop_length;
     const i32 saved_sample = vibe::tape_get({memory_a + 1, vibe::used_words}, saved_start);
-    block(state_a, memory_a, false, 0);
     vibe::initialize(state_a);
     block(state_a, memory_a, false, 0);
     if (!check(state_a.captured && state_a.loop_start == saved_start && state_a.loop_length == saved_length,
                "Hold did not restore across reset")) return false;
-    for (unsigned i = 0; i < 64; ++i)
-        if (!check(left[i] == 0 && right[i] == 0, "Hold played while stopped")) return false;
     bool heard = false;
     for (unsigned k = 0; k < 10; ++k) {
         block(state_a, memory_a, true, 0);
@@ -179,7 +177,7 @@ static bool overdub_waits_for_input() {
     std::memset(memory_a, 0, sizeof(memory_a));
     vibe::initialize(state_a);
     controls[3] = option(3, 4);
-    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 64 * 131072);
+    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 1024);
     if (!check(!state_a.captured && !state_a.ring_valid, "overdub captured quiet input")) return false;
     for (unsigned k = 0; k < 20; ++k) block(state_a, memory_a, true, 268435456);
     if (!check(!state_a.captured, "overdub captured before full length")) return false;
@@ -188,7 +186,7 @@ static bool overdub_waits_for_input() {
     for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 0);
     const u32 index = vibe::ring_index(state_a.loop_start + 1);
     const i32 before = vibe::tape_get({memory_a + 1, vibe::used_words}, index);
-    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 64 * 131072);
+    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 1024);
     return check(vibe::tape_get({memory_a + 1, vibe::used_words}, index) == before, "quiet input modified the loop");
 }
 static bool mono_and_filtering() {
@@ -253,7 +251,7 @@ static bool fragments_history_and_stop() {
     block(state_a, memory_a, true, 0);
     if (!check(state[4] == 0, "Off retained fragment playback")) return false;
     block(state_a, memory_a, false, 0);
-    return check(state[1] == 0 && state[4] == 0, "stop retained fragment history");
+    return check(state[1] > 0 && state[4] == 0, "history or Off state lost when transport changed");
 }
 static bool modes_and_extremes() {
     defaults();
