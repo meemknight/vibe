@@ -12,7 +12,7 @@ static i32 option(u32 i, u32 n) {
 static void controls() {
     std::memset(p, 0, sizeof(p));
     p[5] = 2147483647; p[2] = 0;
-    p[4] = option(1, 6); p[3] = option(1, 4);
+    p[4] = option(1, 6); p[3] = option(1, 3);
 }
 static i32 signal(u32 i) {
     const i32 phase = static_cast<i32>(i & 63u);

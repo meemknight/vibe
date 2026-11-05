@@ -346,7 +346,8 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         for (u32 i = 0; i < opxy::block_frames; ++i) left[i] = right[i] = 0;
         return;
     }
-    const u32 mode = choice(p[3], 4);
+    const u32 selected_mode = choice(p[3], VIBE_ENABLE_HOLD ? 4 : 3);
+    const u32 mode = !VIBE_ENABLE_HOLD && selected_mode == 2 ? 3 : selected_mode;
     // Hold metadata stays in the send scratch across effect resets. Audio is
     // only restored when both markers and all recorded bounds are valid.
     u32* const saved = reinterpret_cast<u32*>(b.words + wet_base - 22);
@@ -419,6 +420,8 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         s.overdub_active = 0;
     }
     if (wet_mode != s.previous_wet_mode) {
+        s.transition_from[0] = s.previous_wet[0];
+        s.transition_from[1] = s.previous_wet[1];
         s.transition = 256;
         s.previous_wet_mode = wet_mode;
         if (wet_mode == 2) s.grab_counter = 0;
@@ -497,13 +500,19 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
                 modulation(s, b, wet_mode, static_cast<u32>(wet_moving), spread, feed_l, feed_r, wet_l, wet_r);
         }
         if (s.transition) {
-            wet_l = wet_mix(wet_l, s.previous_wet[0], static_cast<i32>(s.transition * 16));
-            wet_r = wet_mix(wet_r, s.previous_wet[1], static_cast<i32>(s.transition * 16));
+            if (s.transition > 128) {
+                const i32 gain = static_cast<i32>((s.transition - 128) * 32);
+                wet_l = wet_mix(0, s.transition_from[0], gain);
+                wet_r = wet_mix(0, s.transition_from[1], gain);
+            } else {
+                const i32 gain = static_cast<i32>((128 - s.transition) * 32);
+                wet_l = wet_mix(0, wet_l, gain);
+                wet_r = wet_mix(0, wet_r, gain);
+            }
             --s.transition;
-        } else {
-            s.previous_wet[0] = wet_l;
-            s.previous_wet[1] = wet_r;
         }
+        s.previous_wet[0] = wet_l;
+        s.previous_wet[1] = wet_r;
         if (spread && s.captured) {
             const i32 loop_mid = (loop_l + loop_r) / 2, loop_side = (loop_l - loop_r) / 2;
             const i32 loop_extra = q15(loop_side, static_cast<i32>(spread)) / 2;

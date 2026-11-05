@@ -27,9 +27,9 @@ static bool moving_loop_pan() {
     for (unsigned i=0;i<vibe::used_words;++i) mem[i]=0;
     vibe::initialize(state);
     for (unsigned i=0;i<12;++i) p[i]=0;
-    p[1]=opt(5,8); p[3]=opt(2,4); p[4]=opt(1,6);
+    p[1]=opt(5,8); p[3]=opt(1,3); p[4]=opt(1,6);
     p[5]=1431655765; p[6]=2147483647;
-    state.captured=1; state.loop_length=1764;
+    state.captured=1; state.previous_mode=1; state.loop_length=1764;
     for (unsigned i=0;i<1764;++i) vibe::tape_put({mem,vibe::used_words},i,4000 * 256);
     bool left_louder=false, right_louder=false;
     for (unsigned block=0;block<1700;++block) {

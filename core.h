@@ -1,6 +1,9 @@
 #pragma once
 #include <opxy/effect.hpp>
 
+// Keep in sync with the Looper labels in definition.json when re-enabling.
+#define VIBE_ENABLE_HOLD 0
+
 namespace vibe {
 // The scratch buffer belongs to the send slot, not the effect. Positions count
 // words written since initialize; unwritten ring data is never read.
@@ -39,7 +42,7 @@ struct State {
     opxy::i32 reverb_feedback, reverb_diffusion;
     opxy::i32 reverb_lp[8];
     opxy::u32 previous_wet_mode, transition;
-    opxy::i32 previous_wet[2];
+    opxy::i32 previous_wet[2], transition_from[2];
     opxy::u32 modulation_phase;
     opxy::i32 chorus_lag[2];
     opxy::i32 phaser_x[2][6], phaser_y[2][6], phaser_feedback[2];
