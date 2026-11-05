@@ -23,7 +23,7 @@ The wet channel always processes the incoming send; the loop plays alongside it.
 - **Loop Vol** adjusts only the loop, from silence to 1.5x; about 67% is unity. High levels can saturate the effect return.
 - **Fragment:** records a rolling history of the incoming mono audio even at zero. While Looper is active, below 50%, it adds occasional randomly timed fragments from recent history to the loop return. Above 50%, the history plays continuously with crossfaded random selections, while the original tape is gradually reduced. Fragment size varies with Length (120 ms–1.2 seconds); playback waits for about one second of recorded history. Fragments follow Loop Spd with occasional octave and direction changes and random stereo placement. Loop Vol controls their level. The fragments bypass the Vibe effect.
 - **Spread:** continuously increases stereo width and gradually adds slow left–right panning to the tape and overdub layer. The Vibe effect return is mono. High settings can saturate the return.
-- **Looper:** Off clears the loop. Auto clears the previous loop, waits for audible input and begins looping after 120 ms to one second depending on Length; it continues recording until the full three-second buffer is ready, independently of Length. Overdub records a separate layer up to 1.5 seconds long, regardless of Length and gradually refreshes it with new audible input.
+- **Looper:** Auto is the default. Off clears the loop. Auto clears the previous loop, waits for audible input and begins looping after 120 ms to one second depending on Length; it continues recording until the full three-second buffer is ready, independently of Length. Overdub records a separate layer up to 1.5 seconds long, regardless of Length and gradually refreshes it with new audible input.
 
 Capture and loop playback are driven by incoming audio even when the sequencer is stopped. Stop does not clear or mute the loop; select Off to clear it. Scratch memory can be overwritten by another effect and is not saved to projects or guaranteed across power cycles. The effect cannot reliably observe the device play or Stop state. Hold is temporarily disabled by VIBE_ENABLE_HOLD in core.h; restoring it also requires adding Hold back to the Looper labels in definition.json.
 
@@ -40,7 +40,18 @@ These limits are shorter than DigiTide's original buffers. The sample rate,
 control mappings, spread and gain staging are adapted;
 Vibe is not a bit-exact MOOD MKII or DigiTide. It does not implement MIDI
 notes/CC, MIDI synth mode, separate wet freeze, pedal ramping, or all DIP
-and hidden settings. Hardware sound, CPU use and the UI remain unverified.
+and hidden settings. Hardware sound and the UI still need a full device QA pass.
+
+## Hardware CPU measurement
+
+On the OP-XY, the SDK's isolated effect-callback benchmark measured **3.580%**
+of the audio block budget at Vibe's default settings. The SDK recommends 3.5%
+or less. This is one synthetic run, not a worst-case setting or a measurement
+of total project load. It measured Vibe commit
+`d7919af4e0b167c772182aa1e49b70b1c717ef13` with SDK staging commit
+`2ca22e7aefaef919827f646faa7d67a801eef5d5` and firmware SHA-256
+`125cc759012d6ec9fff5c1f486ed62de0b34b8cb5b19e3c9e77b5ee696645e45`.
+The measurement applies to that source revision, not later changes.
 
 ## Checks and build
 

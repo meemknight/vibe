@@ -2,5 +2,5 @@
   "schema": 1,
   "sdk": "1.9",
   "kind": "effect",
-  "description": "Vibe stereo ambience and micro-looper"
+  "description": "A micro-looper inspired by Mood, and ambient effect with reverb, delay, modulation and randomized tape fragments."
 }
