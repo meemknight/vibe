@@ -30,10 +30,10 @@ Capture and loop playback are driven by incoming audio even when the sequencer i
 ## Memory and limits
 
 Vibe requests 516,096 bytes of per-send scratch memory, 8 KiB below the SDK's
-per-effect limit. The active loop ring holds 33,076 mono 16-bit frames at 11.025 kHz,
-with a selectable capture from about 60 ms to 3 seconds. The overdub layer uses another 16,538 frames (33,076 bytes). The remaining tape storage holds about 6.09 seconds of rolling history for Fragment and a small amount of bookkeeping. A low-pass filter
+per-effect limit. The active loop ring holds 33,076 mono 24-bit frames at 11.025 kHz,
+with a selectable capture from about 60 ms to 3 seconds. The overdub layer uses another 16,538 frames (49,614 bytes). The remaining tape storage holds about 4.9 seconds of rolling history for Fragment and a small amount of bookkeeping. A low-pass filter
 precedes recording, and stereo playback options are applied to the mono loop. The shared
-Delay/Grab/Flanger/Chorus history holds 32,768 mono Q31 frames. The wet effects process Q31 audio; tape storage remains 16-bit. The reverb uses eight feedback lines and input allpasses. The wet memory is cleared
+Delay/Grab/Flanger/Chorus history holds 32,768 mono Q31 frames. The wet effects process Q31 audio; tape storage uses packed 24-bit samples. The reverb uses eight feedback lines and input allpasses. The wet memory is cleared
 in bounded steps after reset, so its output begins after roughly 0.15 seconds.
 
 These limits are shorter than DigiTide's original buffers. The sample rate,

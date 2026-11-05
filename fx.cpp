@@ -16,6 +16,7 @@ u32 ring_index(u32 index) { return index >= loop_frames ? index - loop_frames : 
 const u32 wet_mask = wet_frames - 1;
 const u32 wet_q8_mask = (wet_frames << 8) - 1;
 const u32 rev_mask = reverb_line - 1;
+static_assert((history_base + history_frames) * 3 <= wet_base * 4 - 88, "24-bit tape overlaps Hold metadata");
 const i32 tape_rate[] = {-1365, -682, -341, -170, 170, 341, 682, 1365};
 // The band boundaries and octave speeds follow DigiTide.
 const u32 tape_bands[] = {5, 24, 43, 62, 85, 98, 120};
@@ -31,10 +32,10 @@ u32 band(u32 knob, const u32* bounds, u32 count) {
     while (i < count && value >= bounds[i]) ++i;
     return i;
 }
-i32 clamp16(i32 x) { return x > 32767 ? 32767 : x < -32768 ? -32768 : x; }
-i32 q15(i32 x, i32 y) { return (x * y) >> 15; }
+i32 clamp24(i32 x) { return x > 8388607 ? 8388607 : x < -8388608 ? -8388608 : x; }
+i32 q15(i32 x, i32 y) { return static_cast<i32>(opxy::q31::wide(x, y) >> 15); }
 i32 mix12(i32 a, i32 b, i32 gain) {
-    return a + (((b - a) * gain) >> 12);
+    return a + static_cast<i32>(opxy::q31::wide(b - a, gain) >> 12);
 }
 i32 approach(i32 value, i32 target, i32 step) {
     if (value < target) return value + (target - value < step ? target - value : step);
@@ -51,18 +52,16 @@ i32 smooth_block(i32 value, i32 target) {
     const i32 step = difference / 4;
     return value + (step ? step : (difference > 0) - (difference < 0));
 }
-i32 unpack(u32 word, bool right) {
-    const i32 x = static_cast<i32>(right ? word >> 16 : word & 65535u);
-    return x >= 32768 ? x - 65536 : x;
-}
+// Packed signed 24-bit little-endian samples, entirely before saved metadata.
 i32 tape_get(Buffer b, u32 frame) {
-    return unpack(static_cast<u32>(b.words[frame >> 1]), (frame & 1u) != 0);
+    const opxy::u8* bytes = reinterpret_cast<const opxy::u8*>(b.words) + frame * 3;
+    const u32 bits = static_cast<u32>(bytes[0]) | (static_cast<u32>(bytes[1]) << 8) | (static_cast<u32>(bytes[2]) << 16);
+    return bits & 0x800000u ? static_cast<i32>(bits) - 0x1000000 : static_cast<i32>(bits);
 }
 void tape_put(Buffer b, u32 frame, i32 sample) {
-    const u32 shift = (frame & 1u) * 16u;
-    const u32 mask = 65535u << shift;
-    const u32 old = static_cast<u32>(b.words[frame >> 1]);
-    b.words[frame >> 1] = static_cast<i32>((old & ~mask) | ((static_cast<u32>(clamp16(sample)) & 65535u) << shift));
+    opxy::u8* bytes = reinterpret_cast<opxy::u8*>(b.words) + frame * 3;
+    const u32 bits = static_cast<u32>(clamp24(sample));
+    bytes[0] = static_cast<opxy::u8>(bits); bytes[1] = static_cast<opxy::u8>(bits >> 8); bytes[2] = static_cast<opxy::u8>(bits >> 16);
 }
 i32 wrap(i32 value, i32 length) {
     if (value < 0) value += length;
@@ -90,7 +89,7 @@ void loop_read(const State& s, Buffer b, i32 pos, u32 length, i32& l, i32& r) {
     const u32 next = whole + 1 == length ? 0 : whole + 1;
     const i32 a = tape_get(b, ring_index(s.loop_start + whole));
     const i32 c = tape_get(b, ring_index(s.loop_start + next));
-    l = a + (((c - a) * static_cast<i32>(frac)) >> 10);
+    l = a + (static_cast<i32>(opxy::q31::wide(c - a, static_cast<i32>(frac)) >> 10));
     r = l;
 }
 
@@ -130,7 +129,7 @@ i32 layer_sample(Buffer b, i32 pos, u32 length) {
     const u32 next = whole + 1 == length ? 0 : whole + 1;
     const i32 a = tape_get(b, layer_base + whole);
     const i32 c = tape_get(b, layer_base + next);
-    i32 sample = a + (((c - a) * static_cast<i32>(frac)) >> 10);
+    i32 sample = a + (static_cast<i32>(opxy::q31::wide(c - a, static_cast<i32>(frac)) >> 10));
     if (whole >= length - 128) {
         const i32 first = tape_get(b, layer_base);
         sample = mix12(sample, first, static_cast<i32>((whole - (length - 128)) * 32));
@@ -190,11 +189,11 @@ void looper(State& s, Buffer b, u32 mode, u32 spread, u32 length_control,
             --s.layer_fade;
         }
         s.layer_last = layer_r;
-        out_l = clamp16(out_l + layer_r / 2);
-        out_r = clamp16(out_r + layer_r / 2);
+        out_l = clamp24(out_l + layer_r / 2);
+        out_r = clamp24(out_r + layer_r / 2);
     }
-    out_l = (out_l * s.loop_gain) >> 12;
-    out_r = (out_r * s.loop_gain) >> 12;
+    out_l = static_cast<i32>(opxy::q31::wide(out_l, s.loop_gain) >> 12);
+    out_r = static_cast<i32>(opxy::q31::wide(out_r, s.loop_gain) >> 12);
     if (mode == 3) {
         // Gate very quiet input with hysteresis, then fade the write level to
         // avoid clicks. The envelope retains short gaps between notes.
@@ -202,8 +201,8 @@ void looper(State& s, Buffer b, u32 mode, u32 spread, u32 length_control,
         if (peak > s.overdub_envelope) s.overdub_envelope = peak;
         else if (s.overdub_envelope)
             s.overdub_envelope -= (s.overdub_envelope >> 9) ? (s.overdub_envelope >> 9) : 1;
-        if (!s.overdub_active && s.overdub_envelope >= 128) s.overdub_active = 1;
-        if (s.overdub_active && s.overdub_envelope < 64) s.overdub_active = 0;
+        if (!s.overdub_active && s.overdub_envelope >= 2) s.overdub_active = 1;
+        if (s.overdub_active && s.overdub_envelope < 1) s.overdub_active = 0;
         s.overdub_mix = approach(s.overdub_mix, s.overdub_active ? 16384 : 0, 32);
         if (tape_tick) {
             const u32 at = layer_base + s.overdub_position;
@@ -311,7 +310,7 @@ i32 fragment_sample(Buffer b, u32 start, u32 size, i32 head) {
     at = start + next;
     if (at >= history_frames) at -= history_frames;
     const i32 c = tape_get(b, history_base + at);
-    i32 result = a + (((c - a) * (head & 1023)) >> 10);
+    i32 result = a + (static_cast<i32>(opxy::q31::wide(c - a, head & 1023) >> 10));
     if (whole >= size - 128) {
         const i32 first = tape_get(b, history_base + start);
         result = mix12(result, first, static_cast<i32>((whole - (size - 128)) * 32));
@@ -351,7 +350,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     // Hold metadata stays in the send scratch across effect resets. Audio is
     // only restored when both markers and all recorded bounds are valid.
     u32* const saved = reinterpret_cast<u32*>(b.words + wet_base - 22);
-    if (!s.controls_ready && mode == 2 && saved[0] == 0x56494246u && saved[1] == 0x484f4c44u &&
+    if (!s.controls_ready && mode == 2 && saved[0] == 0x56494247u && saved[1] == 0x484f4c44u &&
         saved[2] < loop_frames && saved[3] >= 256 && saved[3] <= loop_frames &&
         saved[4] <= layer_frames && saved[5] <= saved[4]) {
         s.loop_start = saved[2]; s.loop_length = saved[3];
@@ -464,8 +463,8 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     for (u32 i = 0; i < opxy::block_frames / 4; ++i) {
         if (s.smoothed[4] != targets[4]) s.smoothed[4] = smooth_control(s.smoothed[4], targets[4]);
         // Four-tap binomial anti-alias filter before quarter-rate processing.
-        const i32 x_l = ((left[4*i] >> 17) + 3*(left[4*i+1] >> 17) + 3*(left[4*i+2] >> 17) + (left[4*i+3] >> 17)) / 8;
-        const i32 x_r = ((right[4*i] >> 17) + 3*(right[4*i+1] >> 17) + 3*(right[4*i+2] >> 17) + (right[4*i+3] >> 17)) / 8;
+        const i32 x_l = ((left[4*i] >> 9) + 3*(left[4*i+1] >> 9) + 3*(left[4*i+2] >> 9) + (left[4*i+3] >> 9)) / 8;
+        const i32 x_r = ((right[4*i] >> 9) + 3*(right[4*i+1] >> 9) + 3*(right[4*i+2] >> 9) + (right[4*i+3] >> 9)) / 8;
         const i32 mono = (x_l + x_r) / 2;
         s.tape_input_lp[0] += ((mono - s.tape_input_lp[0]) * 3) / 8;
         s.tape_input_lp[1] += ((s.tape_input_lp[0] - s.tape_input_lp[1]) * 3) / 8;
@@ -508,8 +507,8 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         if (spread && s.captured) {
             const i32 loop_mid = (loop_l + loop_r) / 2, loop_side = (loop_l - loop_r) / 2;
             const i32 loop_extra = q15(loop_side, static_cast<i32>(spread)) / 2;
-            loop_l = clamp16(loop_mid + loop_side + loop_extra);
-            loop_r = clamp16(loop_mid - loop_side - loop_extra);
+            loop_l = clamp24(loop_mid + loop_side + loop_extra);
+            loop_r = clamp24(loop_mid - loop_side - loop_extra);
         }
         if (mode && fragment_remaining) {
             const bool continuous = density > 16384;
@@ -537,7 +536,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
             if (continuous) {
                 loop_l = q15(loop_l, history_tape_gain); loop_r = q15(loop_r, history_tape_gain);
             }
-            loop_l = clamp16(loop_l + fragment_l); loop_r = clamp16(loop_r + fragment_r);
+            loop_l = clamp24(loop_l + fragment_l); loop_r = clamp24(loop_r + fragment_r);
             fragment_head = wrap(fragment_head + fragment_step, static_cast<i32>(fragment_length << 10));
             --fragment_remaining;
             if (!fragment_remaining && continuous && next_length) {
@@ -550,11 +549,11 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
             }
         }
         if (!mode && s.captured && !s.loop_gain) s.captured = 0;
-        const i32 record_mono = (x_l + x_r) / 2 + (wet_l >> 17) / 2;
+        const i32 record_mono = (x_l + x_r) / 2 + (wet_l >> 9) / 2;
         s.tape_record_lp[0] += ((record_mono - s.tape_record_lp[0]) * 3) / 8;
         s.tape_record_lp[1] += ((s.tape_record_lp[0] - s.tape_record_lp[1]) * 3) / 8;
         if (mode != 0 && (!s.captured || auto_filling)) {
-            if (feed_l > 65536 || feed_l < -65536) s.listening = 1;
+            if (feed_l > 512 || feed_l < -512) s.listening = 1;
             if (s.listening && tape_tick) {
                 // Record the incoming signal and some of the wet sound,
                 // just as DigiTide listens to the pedal's output.
@@ -575,8 +574,8 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
         const i32 loop_gain = s.smoothed[4];
         const i32 lo_l = q15(loop_l, loop_gain), lo_r = q15(loop_r, loop_gain);
         // Linear 0 to 1.5x loop gain; wet gain is independent.
-        const i32 out_l = wet_add(wet_l, clamp16(lo_l + lo_l / 2) * 65536);
-        const i32 out_r = wet_add(wet_r, clamp16(lo_r + lo_r / 2) * 65536);
+        const i32 out_l = wet_add(wet_l, clamp24(lo_l + lo_l / 2) * 256);
+        const i32 out_r = wet_add(wet_r, clamp24(lo_r + lo_r / 2) * 256);
         for (u32 j = 0; j < 4; ++j) {
             left[4*i+j] = wet_mix(s.half_previous[0], out_l, static_cast<i32>((j+1)*1024));
             right[4*i+j] = wet_mix(s.half_previous[1], out_r, static_cast<i32>((j+1)*1024));
@@ -586,7 +585,7 @@ void process(State& s, Buffer b, const opxy::Transport& transport,
     if (mode == 2 && s.captured) {
         saved[2] = s.loop_start; saved[3] = s.loop_length;
         saved[4] = s.layer_length; saved[5] = s.layer_valid;
-        saved[0] = 0x56494246u; saved[1] = 0x484f4c44u;
+        saved[0] = 0x56494247u; saved[1] = 0x484f4c44u;
     }
 }
 } // namespace vibe

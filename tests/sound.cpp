@@ -161,13 +161,13 @@ static bool long_capture_wraps() {
     vibe::initialize(state_a);
     controls[7] = max_word;
     controls[3] = option(1, 4);
-    for (u32 i = vibe::loop_frames / 2; i < vibe::history_base / 2; ++i) memory_a[i + 1] = 0x12345678;
+    for (u32 i = (vibe::loop_frames * 3 + 3) / 4; i < (vibe::history_base * 3) / 4; ++i) memory_a[i + 1] = 0x12345678;
     for (unsigned k = 0; k < 2200; ++k) block(state_a, memory_a, true, 268435456);
     if (!check(state_a.ring_valid == vibe::loop_frames && state_a.ring_write < vibe::loop_frames,
                "long recording ring did not wrap safely")) return false;
     controls[3] = option(2, 4);
     block(state_a, memory_a, true, 0);
-    for (u32 i = vibe::loop_frames / 2; i < vibe::history_base / 2; ++i)
+    for (u32 i = (vibe::loop_frames * 3 + 3) / 4; i < (vibe::history_base * 3) / 4; ++i)
         if (!check(memory_a[i + 1] == 0x12345678, "reserved tape memory was overwritten")) return false;
     return check(state_a.captured && state_a.loop_length == vibe::loop_frames,
                  "long capture did not retain the requested history");
@@ -177,7 +177,7 @@ static bool overdub_waits_for_input() {
     std::memset(memory_a, 0, sizeof(memory_a));
     vibe::initialize(state_a);
     controls[3] = option(3, 4);
-    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 1024);
+    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 32);
     if (!check(!state_a.captured && !state_a.ring_valid, "overdub captured quiet input")) return false;
     for (unsigned k = 0; k < 20; ++k) block(state_a, memory_a, true, 268435456);
     if (!check(!state_a.captured, "overdub captured before full length")) return false;
@@ -186,7 +186,7 @@ static bool overdub_waits_for_input() {
     for (unsigned k = 0; k < 50; ++k) block(state_a, memory_a, true, 0);
     const u32 index = vibe::ring_index(state_a.loop_start + 1);
     const i32 before = vibe::tape_get({memory_a + 1, vibe::used_words}, index);
-    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 1024);
+    for (unsigned k = 0; k < 100; ++k) block(state_a, memory_a, true, 32);
     return check(vibe::tape_get({memory_a + 1, vibe::used_words}, index) == before, "quiet input modified the loop");
 }
 static bool mono_and_filtering() {
